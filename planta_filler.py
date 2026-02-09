@@ -8,28 +8,19 @@ import time
 import argparse
 import sys
 import re
-import yaml
 from datetime import datetime, timedelta
 from typing import List, Dict, Tuple, Optional
 from pathlib import Path
 from calculations import fill_day
+
 from config import (
     DEFAULT_URL, DEFAULT_STRATEGY, DEFAULT_WEEKDAYS, DEFAULT_DELAY,
     DEFAULT_CLOSE_DELAY, DEFAULT_USE_PERSISTENT_PROFILE, DEFAULT_HEADLESS,
-    VALID_STRATEGIES, VALID_WEEKDAYS, MAX_DELAY, MIN_DELAY
+    VALID_STRATEGIES, VALID_WEEKDAYS, MAX_DELAY, MIN_DELAY,
+    SELECTORS
 )
 from validation import validate_all_inputs, ValidationError
 from week_handler import parse_week_spec, format_week_display
-
-
-def load_selectors(config_path: Path = None) -> dict:
-    if config_path is None:
-        config_path = Path(__file__).parent / 'planta_selectors.yaml'
-    with open(config_path, 'r') as f:
-        return yaml.safe_load(f)
-
-SELECTORS = load_selectors()
-
 
 def start_driver(headless: bool = False, use_persistent_profile: bool = True):
     options = Options()
@@ -155,7 +146,8 @@ def set_week(
                 total_hours=day_target,
                 current_values=current_values,
                 retries=3,
-                precision=2
+                precision=2,
+                post_randomization=False
             )
             print(f"   Calculated distribution: {new_values} (sum: {sum(new_values):.2f}h)")
             
@@ -436,8 +428,6 @@ Weekday codes: 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun
             )
     finally:
         end_driver(driver)
-
-
 
 if __name__ == '__main__':
     main()

@@ -1,8 +1,9 @@
 import copy
-import warnings
+import random
 from strategies import strategies
 
-def apply_fill_values(current_values:list[float], exclude_values:list[int], fill_values:list[float], slots:int):
+def apply_fill_values(current_values:list[float], exclude_values:list[int], fill_values:list[float], slots:int, post_randomization=0.2, precision:int=2):
+    # NOTE: post randomization applies to all values, also the excluded ones
     """
     Fill only positions where:
       - current_values[i] == -1 (blank)
@@ -10,6 +11,28 @@ def apply_fill_values(current_values:list[float], exclude_values:list[int], fill
     Leave excluded positions (exclude_values[i] == 1) untouched.
     """
     res = copy.deepcopy(current_values)
+    if post_randomization:
+        # [1, 2, 3, 0, 0]
+        # # apply very basic randomization - decrease one value randomly, increase another randomly
+        # if len(fill_values) % 2 == 0:
+        #     pass
+        # else:
+        #     # pick random index that is not included in randomization
+        #     randomized_fill_values[0] = fill_values[0]
+        assert post_randomization < 1, f"randomization parameter has to be lower than 1, so the values are guaranteed to be non-negative, got randomization parameter {post_randomization}"
+        random_values = [value + round((post_randomization* random.uniform(-value, value)), 2) for value in fill_values] # add randomization to entries
+        # ensure values still add up tot total_hours
+        diff = sum(fill_values) - sum(random_values)
+        if abs(diff) // len(random_values) >= 1/(10**precision): # first apply diff to all values the same
+            random_values = [v + (diff/len(random_values)) for v in random_values]
+        diff = sum(fill_values) - sum(random_values)
+        indices_positive = [i for i, val in enumerate(random_values) if (val+diff) > 0]
+        if indices_positive:
+            random_index = random.choice(indices_positive)
+            random_values[random_index] += diff
+        assert sum(random_values) == sum(fill_values), f"Post randomization failed - sum does not add up got {random_values} with sum {sum(random_values)} but should be {sum(fill_values)}"
+        fill_values = random_values
+    
     fill_idx = 0
     for i, (cv, ex) in enumerate(zip(res, exclude_values)):
         if ex == 1:
@@ -22,11 +45,10 @@ def apply_fill_values(current_values:list[float], exclude_values:list[int], fill
             res[i] = max(fill_values[fill_idx], 0)
             fill_idx += 1
     assert fill_idx == slots, f"Expected to fill {slots} blanks, filled {fill_idx}"
-    res = [max(0,v) for v in res]
+    res = [max(0.0,v) for v in res]
     return res
 
-
-def fill_day(override_mode: bool, strategy: str, exclude_values: list[int], total_hours: float, current_values: list[float], retries: int, precision:int, reference_day = []):
+def fill_day(override_mode: bool, strategy: str, exclude_values: list[int], total_hours: float, current_values: list[float], retries: int, precision:int, reference_day = [], post_randomization=0):
     """
     looks up current values
     gets user input
@@ -75,8 +97,8 @@ def fill_day(override_mode: bool, strategy: str, exclude_values: list[int], tota
     4) Copy from reference day over all 11 slots:
        The mock reference day is [0, 0, 1, 2, 0.0, 0.0, 1, 1, 1, 1, 1] (negatives become 0).
        Sum(ref) = 8, so with total_hours=8.0, values match the ref proportions.
-       >>> fill_day(False, "copy_reference", [0]*11, 8.0, [-1]*11, retries=5, precision=2)
-       [0.0, 0.0, 1.0, 2.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+       >>> fill_day(False, "copy_reference", [1,1,1]+[0]*8, 8.0, [-1]*11, retries=5, precision=2, reference_day=[1]*11)
+       [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
 
     5) Random strategy: check shape and sum (not exact values):
        >>> res = fill_day(False, "random", [], 8.0, [-1, -1, -1, -1], retries=10, precision=2)
@@ -84,6 +106,20 @@ def fill_day(override_mode: bool, strategy: str, exclude_values: list[int], tota
        4
        >>> round(sum(res), 2)
        8.0
+
+    6) test post randomization
+    >>> math.isclose(sum(fill_day(False, "equal", [], 8.0, [1.0, -1, -1, 2.0], retries=5, precision=2, post_randomization=0.2)), 8)
+    True
+
+       total_hours = 10.0, filled sum = 3.0 -> 7.0 over the 2 non-excluded blanks
+       exclude_values marks indices 0 and 2 as excluded (they are already filled)
+       >>> res = fill_day(False, "equal", [1, 0, 1, 0], 10.0, [2.0, -1, 1.0, -1], retries=5, precision=2)
+       >>> len(res)
+       4
+       >>> round(sum(res), 2)
+       10.0
+       >>> res[0], res[2]
+       (2.0, 1.0)
     """
     assert all(isinstance(v, (int, float)) for v in current_values), "All values must be int or float"
     
@@ -112,15 +148,15 @@ def fill_day(override_mode: bool, strategy: str, exclude_values: list[int], tota
         fill_values = strategies['random'](hours_to_distribute, slots, precision, retries)
     elif strategy == "copy_reference":
         try:
+            # reference day has to be cut away where exclude = 1
             reference_day = [v if v >= 0 else 0.0 for v in reference_day]
-            fill_values = strategies['copy_reference'](hours_to_distribute, slots, reference_day, precision)
-        except:
-            warnings.warn(f"Reference day could not be applied, equal strategy is applied")
+            applied_exclude_reference_day = [v for v, exc, current in zip(reference_day, exclude_values, current_values) if exc == 0 and current == -1]
+            fill_values = strategies['copy_reference'](hours_to_distribute, slots, applied_exclude_reference_day, precision)
+        except Exception as e:
             fill_values = strategies['equal'](hours_to_distribute, slots, precision)
     else:
         raise ValueError(f"Strategy: {strategy} unknown")
 
-    res = apply_fill_values(current_values, exclude_values, fill_values, slots)
-    print(f"res: {res}")
+    res = apply_fill_values(current_values, exclude_values, fill_values, slots, post_randomization, precision)
     assert sum(res) == total_hours, f"calculated values do not add up, got {sum(res)}, should: {total_hours}"
     return res

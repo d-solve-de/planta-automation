@@ -6,13 +6,13 @@ Selenium-based automation for PLANTA timesheet filling. Automates hour distribut
 
 ```bash
 # Install dependencies
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 
 # Run with defaults (fill current week Mon-Fri with equal strategy)
-python planta_filler.py
+python3 planta_filler.py
 
 # Show full manual
-python planta_filler.py --man
+python3 planta_filler.py --man
 ```
 
 ## Features
@@ -27,22 +27,22 @@ python planta_filler.py --man
 
 ```bash
 # Fill with random noise (natural-looking values)
-python planta_filler.py --strategy random_noise
+python3 planta_filler.py --strategy random_noise
 
 # Fill specific weekdays only
-python planta_filler.py --weekdays 0,2,4  # Mon, Wed, Fri
+python3 planta_filler.py --weekdays 0,2,4  # Mon, Wed, Fri
 
 # Fill last week
-python planta_filler.py --week -1
+python3 planta_filler.py --week -1
 
 # Fill specific week
-python planta_filler.py --week 2024-W05
+python3 planta_filler.py --week 2024-W05
 
 # Reset all hours to zero
-python planta_filler.py --reset
+python3 planta_filler.py --reset
 
 # Run headless with persistent profile
-python planta_filler.py --headless --persistent
+python3 planta_filler.py --headless --persistent
 ```
 
 ## Strategies
@@ -51,7 +51,6 @@ python planta_filler.py --headless --persistent
 |----------|-------------|
 | `equal` | Distributes hours equally across all tasks |
 | `random` | Random distribution with variance |
-| `random_noise` | Equal distribution with small random variations for natural look |
 | `copy_reference` | Copies proportions from reference day file |
 
 ## Configuration
@@ -60,7 +59,7 @@ All defaults are defined in `config.py`:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `DEFAULT_URL` | `https://pze.rz.bankenit.de/` | PLANTA URL |
+| `DEFAULT_URL` | `None` | PLANTA URL |
 | `DEFAULT_STRATEGY` | `equal` | Distribution strategy |
 | `DEFAULT_WEEKDAYS` | `[0,1,2,3,4]` | Mon-Fri |
 | `DEFAULT_DELAY` | `0.1` | Seconds between field updates |

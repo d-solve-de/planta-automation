@@ -3,8 +3,8 @@ from pathlib import Path
 from config import DEFAULT_REFERENCE_FILE
 
 
-def load_reference_day(filepath: str = None, num_slots: int = None) -> list:
-    if filepath is None:
+def load_reference_day(filepath: str='', num_slots:int=0) -> list:
+    if filepath == '':
         filepath = DEFAULT_REFERENCE_FILE
     
     path = Path(filepath)

@@ -1,10 +1,11 @@
 import random
-
+import math
 """
 thes strategies presented here all get the total_hours worked at the day and the number of slots 
 and returns an array filled with values according to the strategy
 the values are not in the right format to be filled in the cells in planta already, it is only a list of values to be used
 """
+
 def validate_hours_and_slots(total_hours: float, slots: int, precision: int=2):
     if slots <= 0:
         raise ValueError("slots must be a positive integer")
@@ -23,12 +24,13 @@ def enforce_exact_sum(total_hours: float, values: list, precision: int=2):
     if values == []:
         return values
     values = [round(v, precision) for v in values]
-    diff = total_hours - sum(values)
+    diff = (total_hours - sum(values))
     if diff == 0:
         return values
     else:
         if abs(diff) > 0:
-            values[-1] = (values[-1] + diff)
+            index = random.randint(0, len(values)-1)
+            values[index] = round((values[index] + diff),precision)
         assert sum(values) == total_hours, f"total_hours should match the sum of values but total_hours={total_hours} vs. sum(values)={sum(values)}"
         return values
 
@@ -44,10 +46,10 @@ def distribute_equal(total_hours: float, slots: int, precision: int=2):
     Non-exact division: 10 hours, 3 slots
     Base is round(10/3, 2) = 3.33,
     sum is corrected to 10.0 by adjusting the last value.
-    >>> distribute_equal(10.0, 3)
+    >>> sorted(distribute_equal(10.0, 3))
     [3.33, 3.33, 3.34]
 
-    >>> distribute_equal(2.25, 2)
+    >>> sorted(distribute_equal(2.25, 2))
     [1.12, 1.13]
     """
     result = validate_hours_and_slots(total_hours, slots, precision) 
@@ -82,18 +84,21 @@ def distribute_random(total_hours, slots, precision: int=2, retries = 5):
 
 def copy_reference_day(total_hours: float, slots: int, reference_day: list, precision:int=2):
     """
+    expects to get only the parts of the reference day relevant - not the whole reference day
+    """
+    """
     Zero slots -> empty list:
-    >>> copy_weekday(8,1, [1,2,3])
+    >>> copy_reference_day(8,1, [1])
     [8]
 
-    >>> copy_weekday(8.0, 4, [1,1,1,1])
+    >>> copy_reference_day(8.0, 4, [1,1,1,1])
     [2.0, 2.0, 2.0, 2.0]
 
-    >>> copy_weekday(10.0, 4, [0,1,1,2])
+    >>> copy_reference_day(10.0, 4, [0,1,1,2])
     [0.0, 2.5, 2.5, 5.0]
     """
-    assert len(reference_day) == slots
-    result = validate_hours_and_slots(total_hours, slots) 
+    assert len(reference_day) == slots, f"reference day is not of same length as number of slots got: {len(reference_day)} vs. {slots}"
+    result = validate_hours_and_slots(total_hours, slots)
     if result is not None:
         return result
     values = [total_hours * v / sum(reference_day) for v in reference_day]

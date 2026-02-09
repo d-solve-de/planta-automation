@@ -19,7 +19,6 @@ OPTIONS
           random       - Random distribution with variance
           equal        - Equal distribution across all tasks
           copy_reference - Copy pattern from reference day
-          random_noise - Equal with random noise for natural look
         Default: {default_strategy}
 
     --weekdays WEEKDAYS
@@ -69,25 +68,25 @@ OPTIONS
 
 EXAMPLES
     Basic usage with defaults (fill Mon-Fri with equal strategy):
-        python planta_filler.py
+        python3 planta_filler.py
 
     Fill with random noise distribution:
-        python planta_filler.py --strategy random_noise
+        python3 planta_filler.py --strategy random_noise
 
     Fill only Monday, Wednesday, Friday:
-        python planta_filler.py --weekdays 0,2,4
+        python3 planta_filler.py --weekdays 0,2,4
 
     Reset current week to zero:
-        python planta_filler.py --reset
+        python3 planta_filler.py --reset
 
     Fill last week:
-        python planta_filler.py --week -1
+        python3 planta_filler.py --week -1
 
     Use persistent profile (saves login):
-        python planta_filler.py --persistent
+        python3 planta_filler.py --persistent
 
     Run in headless mode:
-        python planta_filler.py --headless
+        python3 planta_filler.py --headless
 
 STRATEGIES
     random
@@ -104,12 +103,7 @@ STRATEGIES
         Useful for maintaining consistent patterns.
         Example: Reference [2h, 4h, 2h] (25%, 50%, 25%)
                  New 10h -> [2.5h, 5.0h, 2.5h]
-
-    random_noise
-        Applies small random variations to equal distribution.
-        Makes values look more natural than pure equal.
-        Example: 8h across 4 tasks -> [1.92h, 2.15h, 1.88h, 2.05h]
-
+                 
 PERSISTENT PROFILE
     Using --persistent saves cookies and login sessions in:
         ~/.selenium_profiles/planta_firefox/
