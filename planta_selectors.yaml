@@ -1,0 +1,11 @@
+planta:
+  inputs:
+    hours_input: 'input.load-input'
+  attendance:
+    target_hours_div: 'div.load[class*="att-"]'
+  timeouts:
+    presence_seconds: 10
+
+# day back <i class="fas fa-chevron-left"></i>
+# day forward <i class="fas fa-chevron-right"></i>
+# today <div class="label">Heute</div>
