@@ -18,6 +18,7 @@ from config import (
     DEFAULT_CLOSE_DELAY, DEFAULT_USE_PERSISTENT_PROFILE, DEFAULT_HEADLESS,
     VALID_STRATEGIES, VALID_WEEKDAYS, MAX_DELAY, MIN_DELAY
 )
+from validation import validate_all_inputs, ValidationError
 
 
 def load_selectors(config_path: Path = None) -> dict:
@@ -520,7 +521,7 @@ Weekday codes: 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun
     parser.add_argument(
         '--strategy',
         type=str,
-        choices=['random', 'equal', 'copy'],
+        choices=VALID_STRATEGIES,
         default=DEFAULT_STRATEGY,
         help=f'Distribution strategy (default: {DEFAULT_STRATEGY})'
     )
@@ -574,11 +575,22 @@ Weekday codes: 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun
     
     args = parser.parse_args()
     
-    # Parse weekdays
     if args.weekdays:
         weekdays = [int(d.strip()) for d in args.weekdays.split(',')]
     else:
-        weekdays = None
+        weekdays = DEFAULT_WEEKDAYS
+    
+    try:
+        validate_all_inputs(
+            strategy=args.strategy,
+            weekdays=weekdays,
+            delay=args.delay,
+            close_delay=args.close_delay,
+            url=args.url
+        )
+    except ValidationError as e:
+        print(f"\n❌ Validation Error:\n{e}")
+        sys.exit(1)
     
     print("="*70)
     print("PLANTA TIMESHEET AUTOMATION")
