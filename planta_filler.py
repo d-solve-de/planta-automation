@@ -13,6 +13,11 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Tuple, Optional
 from pathlib import Path
 from calculations import fill_day
+from config import (
+    DEFAULT_URL, DEFAULT_STRATEGY, DEFAULT_WEEKDAYS, DEFAULT_DELAY,
+    DEFAULT_CLOSE_DELAY, DEFAULT_USE_PERSISTENT_PROFILE, DEFAULT_HEADLESS,
+    VALID_STRATEGIES, VALID_WEEKDAYS, MAX_DELAY, MIN_DELAY
+)
 
 
 def load_selectors(config_path: Path = None) -> dict:
@@ -22,16 +27,6 @@ def load_selectors(config_path: Path = None) -> dict:
         return yaml.safe_load(f)
 
 SELECTORS = load_selectors()
-
-
-DEFAULT_URL = 'https://pze.rz.bankenit.de/'
-DEFAULT_STRATEGY = 'equal'
-DEFAULT_WEEKDAYS = [0, 1, 2, 3, 4]
-DEFAULT_DELAY = 0.1
-DEFAULT_CLOSE_DELAY = 3.0
-DEFAULT_USE_PERSISTENT_PROFILE = True
-DEFAULT_HEADLESS = False
-
 
 
 def start_driver(headless: bool = False, use_persistent_profile: bool = True):
