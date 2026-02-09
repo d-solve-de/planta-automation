@@ -7,24 +7,30 @@ from selenium.webdriver.firefox.service import Service
 import time
 import argparse
 import sys
+import re
+import yaml
 from datetime import datetime, timedelta
 from typing import List, Dict, Tuple, Optional
 from pathlib import Path
 from calculations import fill_day
 
 
+def load_selectors(config_path: Path = None) -> dict:
+    if config_path is None:
+        config_path = Path(__file__).parent / 'planta_selectors.yaml'
+    with open(config_path, 'r') as f:
+        return yaml.safe_load(f)
 
-# ============================================================================
-# DEFAULT CONFIGURATION
-# ============================================================================
+SELECTORS = load_selectors()
+
+
 DEFAULT_URL = 'https://pze.rz.bankenit.de/'
-DEFAULT_STRATEGY = 'equal'  # Options: 'random', 'equal', 'copy'
-DEFAULT_WEEKDAYS = [0, 1, 2, 3, 4]  # Mon-Fri (0=Mon, 6=Sun)
-DEFAULT_DELAY = 0.1  # Seconds between field updates
-DEFAULT_CLOSE_DELAY = 3.0  # Seconds to wait before closing browser
-DEFAULT_USE_PERSISTENT_PROFILE = True  # Save login between sessions
-DEFAULT_HEADLESS = False  # Show browser window
-# ============================================================================
+DEFAULT_STRATEGY = 'equal'
+DEFAULT_WEEKDAYS = [0, 1, 2, 3, 4]
+DEFAULT_DELAY = 0.1
+DEFAULT_CLOSE_DELAY = 3.0
+DEFAULT_USE_PERSISTENT_PROFILE = True
+DEFAULT_HEADLESS = False
 
 
 
@@ -47,14 +53,12 @@ def start_driver(headless: bool = False, use_persistent_profile: bool = True):
 
 
 def get_target_hours_per_day(driver) -> Dict[str, float]:
-    """Extract target hours from <div class='load att-YYYYMMDD'>."""
     target_hours = {}
-    load_divs = driver.find_elements(By.CSS_SELECTOR, 'div.load[class*="att-"]')
+    load_divs = driver.find_elements(By.CSS_SELECTOR, SELECTORS['selectors']['target_hours_div'])
     
-    import re
     for div in load_divs:
         class_attr = div.get_attribute('class')
-        match = re.search(r'att-(\d{8})', class_attr)
+        match = re.search(SELECTORS['patterns']['date_attr_regex'], class_attr)
         
         if match:
             date_str = match.group(1)
@@ -69,8 +73,7 @@ def get_target_hours_per_day(driver) -> Dict[str, float]:
 
 
 def get_hours_per_day(driver) -> Dict[str, List[Tuple[str, float]]]:
-    """Extract existing hours grouped by date."""
-    all_fields = driver.find_elements(By.CSS_SELECTOR, 'input.load-input')
+    all_fields = driver.find_elements(By.CSS_SELECTOR, SELECTORS['selectors']['hours_input'])
     hours_by_date = {}
     
     for field in all_fields:
@@ -115,8 +118,8 @@ def set_week(
         if not skip_login_prompt:
             input("⏸️  Press ENTER after you've logged in...")
         
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, 'input.load-input'))
+        WebDriverWait(driver, SELECTORS['timeouts']['presence_seconds']).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, SELECTORS['selectors']['hours_input']))
         )
         
         print("\n📊 Extracting data...")
@@ -207,8 +210,8 @@ def reset_week(
         driver.get(url)
         input("⏸️  Press ENTER after you've logged in...")
         
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, 'input.load-input'))
+        WebDriverWait(driver, SELECTORS['timeouts']['presence_seconds']).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, SELECTORS['selectors']['hours_input']))
         )
         
         hours_data = get_hours_per_day(driver)

@@ -1,11 +1,14 @@
-planta:
-  inputs:
-    hours_input: 'input.load-input'
-  attendance:
-    target_hours_div: 'div.load[class*="att-"]'
-  timeouts:
-    presence_seconds: 10
+selectors:
+  hours_input: 'input.load-input'
+  target_hours_div: 'div.load[class*="att-"]'
 
-# day back <i class="fas fa-chevron-left"></i>
-# day forward <i class="fas fa-chevron-right"></i>
-# today <div class="label">Heute</div>
+patterns:
+  date_attr_regex: 'att-(\d{8})'
+
+timeouts:
+  presence_seconds: 10
+
+navigation:
+  day_back: 'i.fas.fa-chevron-left'
+  day_forward: 'i.fas.fa-chevron-right'
+  today_button: 'div.label:contains("Heute")'
