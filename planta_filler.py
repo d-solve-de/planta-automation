@@ -19,6 +19,7 @@ from config import (
     VALID_STRATEGIES, VALID_WEEKDAYS, MAX_DELAY, MIN_DELAY
 )
 from validation import validate_all_inputs, ValidationError
+from week_handler import parse_week_spec, format_week_display
 
 
 def load_selectors(config_path: Path = None) -> dict:
@@ -31,7 +32,6 @@ SELECTORS = load_selectors()
 
 
 def start_driver(headless: bool = False, use_persistent_profile: bool = True):
-    """Start Firefox WebDriver with persistent profile."""
     options = Options()
     
     if headless:
@@ -90,7 +90,6 @@ def get_hours_per_day(driver) -> Dict[str, List[Tuple[str, float]]]:
 
 
 def filter_dates_by_weekdays(dates: List[str], weekdays: List[int]) -> List[str]:
-    """Filter dates by weekday."""
     if not weekdays:
         return dates
     
@@ -107,7 +106,6 @@ def set_week(
     delay: float = DEFAULT_DELAY,
     close_delay: float = DEFAULT_CLOSE_DELAY
 ):
-    """Fill hours for the week (optimized version)."""
     try:
         driver.get(url)
         
@@ -201,7 +199,6 @@ def reset_week(
     delay: float = DEFAULT_DELAY,
     close_delay: float = DEFAULT_CLOSE_DELAY
 ):
-    """Reset all hours to 0."""
     try:
         driver.get(url)
         input("⏸️  Press ENTER after you've logged in...")
@@ -246,213 +243,16 @@ def reset_week(
 
 
 def end_driver(driver):
-    """Close the browser."""
     driver.quit()
 
 
 
 def print_man_page():
-    """Print detailed man page."""
-    man_page = """
-NAME
-    planta-filler - Automatic timesheet filling for PLANTA
-
-SYNOPSIS
-    python planta_filler.py [OPTIONS]
-
-DESCRIPTION
-    Automates filling timesheets in PLANTA by distributing working hours
-    across tasks according to configurable strategies. Reads target hours
-    from the 'Anwesend' column and fills input fields automatically.
-
-OPTIONS
-    --url URL
-        PLANTA URL to access
-        Default: {default_url}
-
-    --strategy STRATEGY
-        Hour distribution strategy. One of:
-          random  - Random distribution with variance (realistic)
-          equal   - Equal distribution across all tasks
-          copy    - Copy distribution pattern from previous week
-        Default: {default_strategy}
-
-    --weekdays WEEKDAYS
-        Comma-separated list of weekdays to process
-        Format: 0,1,2,3,4
-        Weekday codes:
-          0 = Monday
-          1 = Tuesday
-          2 = Wednesday
-          3 = Thursday
-          4 = Friday
-          5 = Saturday
-          6 = Sunday
-        Default: {default_weekdays} (Monday-Friday)
-
-    --reset
-        Reset all hours to 0 instead of filling
-        Default: false (fill mode)
-
-    --persistent
-        Use persistent Firefox profile to save login between sessions
-        Profile location: ~/.selenium_profiles/planta_firefox/
-        Default: {default_persistent}
-
-    --headless
-        Run browser in headless mode (no visible window)
-        Default: {default_headless}
-
-    --delay SECONDS
-        Delay between field updates in seconds
-        Default: {default_delay}
-
-    --close-delay SECONDS
-        Delay before closing browser (time to verify changes)
-        Default: {default_close_delay}
-
-    --help, -h
-        Show help message and exit
-
-    --man
-        Show this manual page
-
-CONFIGURATION
-    Default values can be changed at the top of the script:
+    man_page_path = Path(__file__).parent / 'man_page.txt'
+    with open(man_page_path, 'r') as f:
+        man_page_template = f.read()
     
-    DEFAULT_URL = '{default_url}'
-    DEFAULT_STRATEGY = '{default_strategy}'
-    DEFAULT_WEEKDAYS = {default_weekdays}
-    DEFAULT_DELAY = {default_delay}
-    DEFAULT_CLOSE_DELAY = {default_close_delay}
-    DEFAULT_USE_PERSISTENT_PROFILE = {default_persistent}
-    DEFAULT_HEADLESS = {default_headless}
-
-EXAMPLES
-    Basic usage with defaults (fill Mon-Fri with equal strategy):
-        python planta_filler.py
-
-    Fill with equal distribution:
-        python planta_filler.py --strategy equal
-
-    Fill only Monday, Wednesday, Friday:
-        python planta_filler.py --weekdays 0,2,4
-
-    Reset current week to zero:
-        python planta_filler.py --reset
-
-    Reset only Mon-Fri:
-        python planta_filler.py --reset --weekdays 0,1,2,3,4
-
-    Use persistent profile (saves login):
-        python planta_filler.py --persistent
-
-    Run in headless mode:
-        python planta_filler.py --headless
-
-    Custom URL with copy strategy:
-        python planta_filler.py --url https://example.com/ --strategy copy
-
-    Speed up filling (faster but less reliable):
-        python planta_filler.py --delay 0.05
-
-    Wait 10 seconds before closing (more time to verify):
-        python planta_filler.py --close-delay 10
-
-    Close immediately (no waiting):
-        python planta_filler.py --close-delay 0
-
-STRATEGIES
-    random
-        Distributes hours randomly with ~40% variance around equal
-        distribution. Creates realistic-looking timesheets.
-        Example: 8h across 4 tasks → [1.5h, 2.3h, 2.1h, 2.1h]
-
-    equal
-        Distributes hours equally across all tasks.
-        Example: 8h across 4 tasks → [2.0h, 2.0h, 2.0h, 2.0h]
-
-    copy
-        Copies the percentage distribution from existing values.
-        Useful for maintaining consistent patterns.
-        Example: Previous [2h, 4h, 2h] (25%, 50%, 25%)
-                 New 10h → [2.5h, 5.0h, 2.5h]
-
-HOW IT WORKS
-    1. Opens Firefox and navigates to PLANTA
-    2. Waits for manual login (unless persistent profile is used)
-    3. Reads target hours from <div class="load att-YYYYMMDD">
-    4. Reads current values from input fields
-    5. Calculates new distribution using selected strategy
-    6. Updates fields in browser
-    7. Waits for specified close-delay time
-    8. Closes browser automatically
-
-PERSISTENT PROFILE
-    Using --persistent saves cookies and login sessions in:
-        ~/.selenium_profiles/planta_firefox/
-    
-    This allows you to:
-    - Stay logged in between runs
-    - Skip manual login
-    - Save browser preferences
-    
-    First run: Login manually
-    Subsequent runs: Automatically logged in
-
-FILES
-    ~/.selenium_profiles/planta_firefox/
-        Firefox profile directory (when using --persistent)
-
-    calculations.py
-        Module containing fill_day() distribution algorithm
-
-REQUIREMENTS
-    - Python 3.7+
-    - selenium
-    - Firefox browser
-    - geckodriver (Firefox WebDriver)
-
-INSTALLATION
-    pip install selenium
-
-    # Download geckodriver from:
-    # https://github.com/mozilla/geckodriver/releases
-
-EXIT STATUS
-    0   Success
-    1   Error occurred
-
-TROUBLESHOOTING
-    "selenium.common.exceptions.WebDriverException"
-        → Install geckodriver: https://github.com/mozilla/geckodriver/releases
-
-    "No load div elements found"
-        → Page structure changed, check HTML selectors
-
-    Fields not updating:
-        → Increase --delay value (e.g., --delay 0.3)
-
-    Need more time to verify changes:
-        → Increase --close-delay value (e.g., --close-delay 10)
-
-    Login not saved:
-        → Use --persistent flag
-
-AUTHOR
-    Written for automated PLANTA timesheet filling.
-
-COPYRIGHT
-    MIT License
-
-SEE ALSO
-    selenium documentation: https://selenium-python.readthedocs.io/
-    geckodriver: https://github.com/mozilla/geckodriver
-
-BUGS
-    Report bugs to your internal IT support.
-
-""".format(
+    man_page = man_page_template.format(
         default_url=DEFAULT_URL,
         default_strategy=DEFAULT_STRATEGY,
         default_weekdays=','.join(map(str, DEFAULT_WEEKDAYS)),
@@ -466,11 +266,7 @@ BUGS
     sys.exit(0)
 
 
-
 def main():
-    """Main entry point with CLI arguments."""
-    
-    # Check for --man flag before argparse (to show full manual)
     if '--man' in sys.argv:
         print_man_page()
     
@@ -573,6 +369,13 @@ Weekday codes: 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun
         help='Show detailed manual page'
     )
     
+    parser.add_argument(
+        '--week',
+        type=str,
+        default='0',
+        help='Week to process: YYYY-WNN, or offset (-1=last week, 0=current, 1=next)'
+    )
+    
     args = parser.parse_args()
     
     if args.weekdays:
@@ -592,10 +395,18 @@ Weekday codes: 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun
         print(f"\n❌ Validation Error:\n{e}")
         sys.exit(1)
     
+    try:
+        year, week = parse_week_spec(args.week)
+        week_display = format_week_display(year, week)
+    except ValueError as e:
+        print(f"\n❌ Invalid week specification: {e}")
+        sys.exit(1)
+    
     print("="*70)
     print("PLANTA TIMESHEET AUTOMATION")
     print("="*70)
     print(f"URL:         {args.url}")
+    print(f"Week:        {week_display}")
     print(f"Action:      {'RESET' if args.reset else 'FILL'}")
     if not args.reset:
         print(f"Strategy:    {args.strategy.upper()}")
