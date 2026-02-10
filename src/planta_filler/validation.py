@@ -78,7 +78,7 @@ def validate_all_inputs(
     delay: float,
     close_delay: float,
     url: str,
-    reference_file: str = None
+    reference_file: str = ''
 ) -> dict:
     errors = []
     

@@ -13,7 +13,7 @@
 # =============================================================================
 
 DEFAULT_URL = ''
-DEFAULT_STRATEGY = 'equal'
+DEFAULT_STRATEGY = 'random'
 DEFAULT_WEEKDAYS = [0, 1, 2, 3, 4]
 DEFAULT_DELAY = 0.2
 DEFAULT_CLOSE_DELAY = 10.0
@@ -25,7 +25,7 @@ DEFAULT_PRECISION = 2
 DEFAULT_RETRIES = 5
 VALID_STRATEGIES = ['random', 'equal', 'copy_reference']
 VALID_WEEKDAYS = [0, 1, 2, 3, 4, 5, 6]
-MAX_DELAY = 100.0
+MAX_DELAY = 60.0
 MIN_DELAY = 0.0
 
 SELECTORS = {

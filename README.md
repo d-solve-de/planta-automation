@@ -332,3 +332,8 @@ Edit `src/planta_filler/config.py` to change defaults:
 ## License
 
 MIT License
+
+
+# TODOs
+
+- add the parameter post randomization for the user to choose via cli and change the code accodringly to set the parameter correctly when calling fill_day

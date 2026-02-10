@@ -22,7 +22,6 @@
 # =============================================================================
 
 import random
-import math
 """
 thes strategies presented here all get the total_hours worked at the day and the number of slots 
 and returns an array filled with values according to the strategy
