@@ -20,7 +20,7 @@
 
 import copy
 import random
-from strategies import strategies
+from .strategies import strategies
 
 def apply_fill_values(current_values:list[float], exclude_values:list[int], fill_values:list[float], slots:int, post_randomization=0.2, precision:int=2):
     # NOTE: post randomization applies to all values, also the excluded ones
