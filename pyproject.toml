@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "planta-filler"
-version = "1.0.0"
+version = "0.1.0"
 description = "Selenium-based automation for PLANTA timesheet filling"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.8"
 authors = [
-    {name = "PLANTA Automation Team"}
+    {name = "Felix Paul"}
 ]
 keywords = ["planta", "timesheet", "automation", "selenium"]
 classifiers = [
@@ -42,8 +42,8 @@ dev = [
 planta-filler = "planta_filler.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/yourusername/planta-automation"
-Repository = "https://github.com/yourusername/planta-automation"
+Homepage = "https://github.com/d-solve-de/planta-automation"
+Repository = "https://github.com/d-solve-de/planta-automation"
 
 [tool.setuptools.packages.find]
 where = ["src"]

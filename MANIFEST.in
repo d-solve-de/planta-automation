@@ -1,0 +1,2 @@
+recursive-include src/planta_filler/data *.csv *.txt
+include README.md
