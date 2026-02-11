@@ -21,6 +21,7 @@
 # - copy_reference_day(): Copy from reference proportions
 # =============================================================================
 
+import math
 import random
 """
 thes strategies presented here all get the total_hours worked at the day and the number of slots 
@@ -53,7 +54,7 @@ def enforce_exact_sum(total_hours: float, values: list, precision: int=2):
         if abs(diff) > 0:
             index = random.randint(0, len(values)-1)
             values[index] = round((values[index] + diff),precision)
-        assert sum(values) == total_hours, f"total_hours should match the sum of values but total_hours={total_hours} vs. sum(values)={sum(values)}"
+        assert math.isclose(sum(values), total_hours), f"total_hours should match the sum of values but total_hours={total_hours} vs. sum(values)={sum(values)}"
         return values
 
 def distribute_equal(total_hours: float, slots: int, precision: int=2):

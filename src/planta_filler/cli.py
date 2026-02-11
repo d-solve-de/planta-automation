@@ -20,7 +20,7 @@ from .core import start_driver, end_driver, set_week, reset_week
 from .config import (
     DEFAULT_URL, DEFAULT_STRATEGY, DEFAULT_WEEKDAYS, DEFAULT_DELAY,
     DEFAULT_CLOSE_DELAY, DEFAULT_USE_PERSISTENT_PROFILE, DEFAULT_HEADLESS,
-    VALID_STRATEGIES
+    VALID_STRATEGIES, DEFAULT_POST_RANDOMIZATION
 )
 from .validation import validate_all_inputs, ValidationError
 from .week_handler import parse_week_spec, format_week_display
@@ -141,6 +141,27 @@ Weekday codes: 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun
         default=DEFAULT_CLOSE_DELAY,
         help=f'Delay before closing browser in seconds (default: {DEFAULT_CLOSE_DELAY})'
     )
+
+    parser.add_argument(
+        '--post-randomization',
+        type=float,
+        default=DEFAULT_POST_RANDOMIZATION,
+        help='Post-randomization factor (0.0-<1.0) applied to fill values for natural variation'
+    )
+
+    parser.add_argument(
+        '--reference-file',
+        type=str,
+        default=None,
+        help='Full path to reference CSV (single-day or whole-week). If omitted, uses the default packaged file.'
+    )
+
+    parser.add_argument(
+        '--exclude',
+        type=str,
+        default=None,
+        help='Comma-separated zero-based row indices to exclude from filling (applies to all processed days)'
+    )
     
     parser.add_argument(
         '--man',
@@ -152,7 +173,7 @@ Weekday codes: 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun
         '--week',
         type=str,
         default='0',
-        help='Week to process: YYYY-WNN, or offset (-1=last week, 0=current, 1=next)'
+        help='Week(s) to process: YYYY-WNN or offset (e.g., -1,0 for last and current)'
     )
     
     args = parser.parse_args()
@@ -174,34 +195,67 @@ Weekday codes: 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun
         print(f"\n❌ Validation Error:\n{e}")
         sys.exit(1)
     
+    # Prepare multiple week specs (comma separated allowed, preserve order)
+    week_specs = [w.strip() for w in args.week.split(',') if w.strip()]
+    
     try:
-        year, week = parse_week_spec(args.week)
-        week_display = format_week_display(year, week)
+        # Validate that all week specs are parseable (in order)
+        for w in week_specs:
+            parse_week_spec(w)
     except ValueError as e:
         print(f"\n❌ Invalid week specification: {e}")
         sys.exit(1)
+    
+    # Display summary (use first week for header if multiple)
+    y0, w0 = parse_week_spec(week_specs[0])
+    week_display = format_week_display(y0, w0)
     
     print("="*70)
     print("PLANTA TIMESHEET AUTOMATION")
     print("="*70)
     print(f"URL:         {args.url}")
-    print(f"Week:        {week_display}")
+    print(f"Week:        {week_display}" + (" (and others)" if len(week_specs) > 1 else ""))
     print(f"Action:      {'RESET' if args.reset else 'FILL'}")
     if not args.reset:
         print(f"Strategy:    {args.strategy.upper()}")
+        print(f"Post-randomization: {args.post_randomization}")
+        if args.strategy == 'copy_reference':
+            print(f"Reference file: {args.reference_file or 'DEFAULT'}")
     if weekdays:
         weekday_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
         selected = ', '.join(weekday_names[d] for d in weekdays)
         print(f"Weekdays:    {selected}")
     print(f"Delay:       {args.delay}s")
     print(f"Close delay: {args.close_delay}s")
+    if args.exclude:
+        print(f"Excludes:    {args.exclude}")
+    if args.strategy == 'copy_reference':
+        print(f"Reference:   {args.reference_file or 'DEFAULT'}")
     print("="*70 + "\n")
     
     driver = start_driver(headless=args.headless, use_persistent_profile=args.persistent)
     
+    # Parse exclude indices
+    exclude_indices = None
+    if args.exclude:
+        try:
+            exclude_indices = [int(x.strip()) for x in args.exclude.split(',') if x.strip() != '']
+        except ValueError:
+            print("\n❌ Invalid exclude specification: must be comma-separated integers (0-based row indices)")
+            sys.exit(1)
+    
     try:
         if args.reset:
-            reset_week(driver, args.url, weekdays, args.delay, args.close_delay)
+            reset_week(
+                driver,
+                args.url,
+                weekdays,
+                args.delay,
+                args.close_delay,
+                skip_login_prompt=args.persistent,
+                week_specs=week_specs,
+                exclude_indices=exclude_indices,
+            )
         else:
             set_week(
                 driver,
@@ -210,7 +264,12 @@ Weekday codes: 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun
                 weekdays=weekdays,
                 skip_login_prompt=args.persistent,
                 delay=args.delay,
-                close_delay=args.close_delay
+                close_delay=args.close_delay,
+                post_randomization=args.post_randomization,
+                week_specs=week_specs,
+                reference_day=None,
+                reference_file=args.reference_file,
+                exclude_indices=exclude_indices,
             )
     finally:
         end_driver(driver)

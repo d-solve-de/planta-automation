@@ -19,6 +19,7 @@
 # =============================================================================
 
 import copy
+import math
 import random
 from .strategies import strategies
 
@@ -32,25 +33,25 @@ def apply_fill_values(current_values:list[float], exclude_values:list[int], fill
     """
     res = copy.deepcopy(current_values)
     if post_randomization:
-        # [1, 2, 3, 0, 0]
-        # # apply very basic randomization - decrease one value randomly, increase another randomly
-        # if len(fill_values) % 2 == 0:
-        #     pass
-        # else:
-        #     # pick random index that is not included in randomization
-        #     randomized_fill_values[0] = fill_values[0]
         assert post_randomization < 1, f"randomization parameter has to be lower than 1, so the values are guaranteed to be non-negative, got randomization parameter {post_randomization}"
-        random_values = [value + round((post_randomization* random.uniform(-value, value)), 2) for value in fill_values] # add randomization to entries
-        # ensure values still add up tot total_hours
-        diff = sum(fill_values) - sum(random_values)
-        if abs(diff) // len(random_values) >= 1/(10**precision): # first apply diff to all values the same
-            random_values = [v + (diff/len(random_values)) for v in random_values]
-        diff = sum(fill_values) - sum(random_values)
-        indices_positive = [i for i, val in enumerate(random_values) if (val+diff) > 0]
-        if indices_positive:
-            random_index = random.choice(indices_positive)
-            random_values[random_index] += diff
-        assert sum(random_values) == sum(fill_values), f"Post randomization failed - sum does not add up got {random_values} with sum {sum(random_values)} but should be {sum(fill_values)}"
+        random_values = [value + round((post_randomization * random.uniform(-value, value)), precision) for value in fill_values]  # add randomization to entries
+        # ensure values still add up to total at the given precision
+        target_sum = round(sum(fill_values), precision)
+        current_sum = round(sum(random_values), precision)
+        diff = round(target_sum - current_sum, precision)
+        smallest = 1 / (10 ** precision)
+        if abs(diff) >= smallest and len(random_values) > 0:
+            per = round(diff / len(random_values), precision)
+            random_values = [round(v + per, precision) for v in random_values]
+            current_sum = round(sum(random_values), precision)
+            diff = round(target_sum - current_sum, precision)
+            # apply remaining diff to a single slot (keep non-negative)
+            candidates = [i for i, v in enumerate(random_values) if v + diff >= 0]
+            idx = candidates[0] if candidates else 0
+            random_values[idx] = round(random_values[idx] + diff, precision)
+        assert math.isclose(sum(random_values), sum(fill_values), abs_tol=smallest), (
+            f"Post randomization failed - sum does not add up got {random_values} with sum {sum(random_values)} but should be {sum(fill_values)}"
+        )
         fill_values = random_values
     
     fill_idx = 0
@@ -148,13 +149,16 @@ def fill_day(override_mode: bool, strategy: str, exclude_values: list[int], tota
 
     assert len(current_values) == len(exclude_values), f"the len(current_values) = {len(current_values)} does not match len(exclude_values)= {len(exclude_values)}"
     
+    # Build working view of current_values respecting excludes
+    working_current = list(current_values)
     if override_mode:
-        current_values = [-1] * len(current_values)
+        # Override all non-excluded positions to blanks; keep excluded values intact
+        working_current = [(-1 if ex == 0 else cv) for cv, ex in zip(current_values, exclude_values)]
      # slots: count entries that are blank (-1) and not excluded (0)
-    slots = sum(1 for cv, ex in zip(current_values, exclude_values) if cv == -1 and ex == 0)
+    slots = sum(1 for cv, ex in zip(working_current, exclude_values) if cv == -1 and ex == 0)
 
-    # hours_to_distribute: subtract already filled values from total_hours
-    hours_to_distribute = total_hours - sum(v for v in current_values if v != -1)
+    # hours_to_distribute: subtract values we won't overwrite from total_hours
+    hours_to_distribute = total_hours - sum(v for v in working_current if v != -1)
     hours_to_distribute = round(max(0.0, hours_to_distribute), precision)
     
     if strategy in strategies.keys():
@@ -170,13 +174,33 @@ def fill_day(override_mode: bool, strategy: str, exclude_values: list[int], tota
         try:
             # reference day has to be cut away where exclude = 1
             reference_day = [v if v >= 0 else 0.0 for v in reference_day]
-            applied_exclude_reference_day = [v for v, exc, current in zip(reference_day, exclude_values, current_values) if exc == 0 and current == -1]
+            applied_exclude_reference_day = [v for v, exc, current in zip(reference_day, exclude_values, working_current) if exc == 0 and current == -1]
             fill_values = strategies['copy_reference'](hours_to_distribute, slots, applied_exclude_reference_day, precision)
         except Exception as e:
             fill_values = strategies['equal'](hours_to_distribute, slots, precision)
     else:
         raise ValueError(f"Strategy: {strategy} unknown")
 
-    res = apply_fill_values(current_values, exclude_values, fill_values, slots, post_randomization, precision)
-    assert sum(res) == total_hours, f"calculated values do not add up, got {sum(res)}, should: {total_hours}"
-    return res
+    res = apply_fill_values(working_current, exclude_values, fill_values, slots, post_randomization, precision)
+    
+    # Normalize to UI precision: round each value and adjust residual so that sums match at precision
+    rounded = [max(0.0, round(v, precision)) for v in res]
+    target = round(total_hours, precision)
+    smallest = 1 / (10 ** precision)
+    residual = round(target - sum(rounded), precision)
+    if abs(residual) >= smallest and len(rounded) > 0:
+        # Adjust only a fillable index to absorb the residual (avoid changing excluded/originally filled)
+        fillable_indices = [i for i, (cv, ex) in enumerate(zip(working_current, exclude_values)) if cv == -1 and ex == 0]
+        if fillable_indices:
+            # Prefer the largest of the fillable values
+            idx = max(fillable_indices, key=lambda i: rounded[i])
+            if rounded[idx] + residual < 0:
+                candidates = [i for i in fillable_indices if rounded[i] + residual >= 0]
+                if candidates:
+                    idx = candidates[0]
+            rounded[idx] = round(rounded[idx] + residual, precision)
+        # else: no fillable indices; skip residual adjustment to avoid modifying excluded values
+    assert math.isclose(target, sum(rounded), abs_tol=smallest), (
+        f"post fixing the sum failed - sum does not add up got {rounded} with sum {sum(rounded)} but should be {target}"
+    )
+    return rounded

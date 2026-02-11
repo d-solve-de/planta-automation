@@ -35,12 +35,13 @@ OPTIONS
         Default: {default_weekdays} (Monday-Friday)
 
     --week WEEK
-        Week to process. Format: YYYY-WNN or relative offset
-        Examples: 2024-W05, -1 (last week), 0 (current week)
+        Week(s) to process. Format: YYYY-WNN or relative offset (comma-separated)
+        Examples: 2024-W05, -1 (last week), 0 (current week), 0,-1 (current then last)
+        Preserves the order you provide and navigates between weeks accordingly.
         Default: current week
 
     --reset
-        Reset all hours to 0 instead of filling
+        Reset hours to 0 instead of filling. Applies only to the specified week(s) and respects --exclude.
         Default: false (fill mode)
 
     --persistent
@@ -55,6 +56,14 @@ OPTIONS
     --delay SECONDS
         Delay between field updates in seconds
         Default: {default_delay}
+
+    --exclude INDICES
+        Comma-separated zero-based row indices to exclude from filling/resets
+        Example: --exclude 0,2,4
+
+    --reference-file PATH
+        Full path to a reference CSV (single-day or whole-week). Used with copy_reference.
+        If missing/malformed/mismatched, falls back to equal for the day and logs the reason.
 
     --close-delay SECONDS
         Delay before closing browser (time to verify changes)
