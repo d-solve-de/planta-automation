@@ -400,6 +400,14 @@ Edit `src/planta_filler/config.py` to change defaults:
 | `DEFAULT_HEADLESS` | `False` | Run without visible browser |
 | `VALID_STRATEGIES` | `['random', 'equal', 'copy_reference']` | Available strategies |
 
+
+## Update pypi project
+
+Simply set a new version in Toml
+push cahnges to github
+set tag in git
+    git tag v0.1.1
+    git push origin v0.1.1
 ## License
 
 MIT License
