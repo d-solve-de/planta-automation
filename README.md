@@ -17,7 +17,7 @@ pip3 install planta-filler
 
 ### From Source
 ```bash
-git clone https://github.com/yourusername/planta-automation.git
+git clone https://github.com/d-solve-de/planta-automation.git
 cd planta-automation
 pip3 install -e .
 ```
@@ -34,10 +34,10 @@ pip3 install -e .
 python3 -m planta_filler --url https://your-planta-url.com/
 
 # Process multiple weeks in order (current then last)
-python3 -m planta_filler --url https://your-planta-url.com/ --week 0,-1 --strategy equal
+python3 -m planta_filler --url https://your-planta-url.com/ --week="0,-1" --strategy equal
 
 # Process two previous weeks (two weeks ago, then last week)
-python3 -m planta_filler --url https://your-planta-url.com/ --week -2,-1 --strategy equal
+python3 -m planta_filler --url https://your-planta-url.com/ --week="-2,-1" --strategy equal
 
 # Add natural variation to generated values (post-randomization factor 0.2)
 python3 -m planta_filler --url https://your-planta-url.com/ --strategy equal --post-randomization 0.2
@@ -183,7 +183,13 @@ python3 -m planta_filler --url URL --weekdays $(python3 -c "from datetime import
 ```
 
 ### `--week SPEC`
-Week(s) to process. Default: `0` (current week). Accepts comma-separated specs and processes them in the given order.
+Week(s) to process. Default: `0` (current week).
+
+Each `SPEC` can be:
+- Relative offset: `0` (current), `-1` (last), `1` (next), etc.
+- Absolute ISO week: `YYYY-WNN` (e.g. `2024-W05`).
+
+Multiple weeks are passed as a **single comma-separated string**. Use quotes or the `--week=...` form so the shell treats it as one argument. Internally, the CLI splits this string by comma.
 
 ```bash
 # Current week
@@ -193,14 +199,19 @@ python3 -m planta_filler --url URL --week 0
 python3 -m planta_filler --url URL --week -1
 
 # Process current, then last week (in that order)
-python3 -m planta_filler --url URL --week 0,-1
+python3 -m planta_filler --url URL --week="0,-1"
 
 # Two weeks ago and last week
-python3 -m planta_filler --url URL --week -2,-1
+python3 -m planta_filler --url URL --week="-2,-1"
+
+# Using '=' syntax instead of quotes
+python3 -m planta_filler --url URL --week=-2,-1
 
 # Specific week (ISO format)
 python3 -m planta_filler --url URL --week 2024-W05
 ```
+
+> Note: `--week -1,-2,-3` without quotes can be misinterpreted by the shell or by `argparse`. Always pass multiple week specs as a single argument, e.g. `--week="-1,-2,-3"` or `--week=-1,-2,-3`.
 
 ### `--reset`
 Reset hours to 0 instead of filling. Default: false
@@ -392,3 +403,5 @@ Edit `src/planta_filler/config.py` to change defaults:
 ## License
 
 MIT License
+
+
