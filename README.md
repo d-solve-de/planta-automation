@@ -34,10 +34,10 @@ pip3 install -e .
 python3 -m planta_filler --url https://your-planta-url.com/
 
 # Process multiple weeks in order (current then last)
-python3 -m planta_filler --url https://your-planta-url.com/ --week="0,-1" --strategy equal
+python3 -m planta_filler --url https://your-planta-url.com/ --week=-1,-2,-3,-4 --strategy equal
 
 # Process two previous weeks (two weeks ago, then last week)
-python3 -m planta_filler --url https://your-planta-url.com/ --week="-2,-1" --strategy equal
+python3 -m planta_filler --url https://your-planta-url.com/ --week=-1,-2,-3,-4 --strategy equal
 
 # Add natural variation to generated values (post-randomization factor 0.2)
 python3 -m planta_filler --url https://your-planta-url.com/ --strategy equal --post-randomization 0.2
@@ -99,13 +99,13 @@ python3 -m planta_filler --url https://planta.example.com/
 ### 3. Catch Up on Past Week
 Forgot to fill last week? Fill it retroactively:
 ```bash
-python3 -m planta_filler --url https://planta.example.com/ --week -1
+python3 -m planta_filler --url https://planta.example.com/ --week=-1
 ```
 
 ### 4. Prepare Next Week
 Pre-fill next week's timesheet:
 ```bash
-python3 -m planta_filler --url https://planta.example.com/ --week 1
+python3 -m planta_filler --url https://planta.example.com/ --week=1
 ```
 
 ### 5. Realistic-Looking Values
@@ -193,16 +193,16 @@ Multiple weeks are passed as a **single comma-separated string**. Use quotes or 
 
 ```bash
 # Current week
-python3 -m planta_filler --url URL --week 0
+python3 -m planta_filler --url URL --week=0
 
 # Last week
-python3 -m planta_filler --url URL --week -1
+python3 -m planta_filler --url URL --week=-1
 
 # Process current, then last week (in that order)
-python3 -m planta_filler --url URL --week="0,-1"
+python3 -m planta_filler --url URL --week=0,-1
 
 # Two weeks ago and last week
-python3 -m planta_filler --url URL --week="-2,-1"
+python3 -m planta_filler --url URL --week=-2,-1
 
 # Using '=' syntax instead of quotes
 python3 -m planta_filler --url URL --week=-2,-1
@@ -224,7 +224,7 @@ python3 -m planta_filler --url URL --reset
 python3 -m planta_filler --url URL --reset --weekdays 4
 
 # Reset last week
-python3 -m planta_filler --url URL --reset --week -1
+python3 -m planta_filler --url URL --reset --week=-1
 ```
 
 ### `--persistent`
