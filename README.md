@@ -7,6 +7,7 @@ Key features:
 - Optional post-randomization to add slight natural variation to generated values.
 - Exclude specific rows from filling via --exclude, independent of strategy.
 - Reference support: supply a custom weekly CSV via --reference-file, or use the packaged default.
+- Supports different fill strategies like equal distribution, random distribution, copy_reference
 
 ## Installation
 
@@ -46,6 +47,8 @@ python3 -m planta_filler --url https://your-planta-url.com/ --strategy equal --p
 python3 -m planta_filler --url https://your-planta-url.com/ --strategy equal --exclude 1,3
 
 # Use a custom weekly reference file (full path)
+Reference file examples can be found in https://github.com/d-solve-de/planta-automation/tree/main/src/planta_filler/data
+
 python3 -m planta_filler --url https://your-planta-url.com/ --strategy copy_reference \
   --reference-file /absolute/path/to/my_week_reference.csv
 
@@ -53,6 +56,13 @@ python3 -m planta_filler --url https://your-planta-url.com/ --strategy copy_refe
 python3 -m planta_filler --man
 ```
 
+## Recommended Setup
+
+- Use a reference file template given under https://github.com/d-solve-de/planta-automation/tree/main/src/planta_filler/data and adapt to your number of planta rows and your typical time management
+- Use
+```
+python3 -m planta_filler --url https://your-planta-url.com/ --strategy copy_reference --reference-file /absolute/path/to/my_week_reference.csv --post-randomization 0.0
+```
 ## Main Functions
 
 | Function | Module | Description |
@@ -117,7 +127,7 @@ python3 -m planta_filler --url https://planta.example.com/ --strategy random
 ### 6. Consistent Patterns
 Use reference day for consistent project hour ratios:
 ```bash
-python3 -m planta_filler --url https://planta.example.com/ --strategy copy_reference
+python3 -m planta_filler --url https://planta.example.com/ --strategy copy_reference --reference-file /absolute/path/to/my_week_reference.csv
 ```
 
 ### 7. Clean Slate
