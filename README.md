@@ -1,425 +1,87 @@
-# PLANTA Timesheet Automation
+# planta-filler
 
-Selenium-based automation for PLANTA timesheet filling. Automates hour distribution across tasks using configurable strategies, running headlessly or with Firefox UI.
+Automatic timesheet filling for **PLANTA Pulse**. The tool opens your timesheet in
+Firefox, reads the attendance hours of every day and distributes them over your task
+rows, exactly as if you had typed them yourself.
 
-Key features:
-- Fill one or multiple weeks via --week (supports comma-separated values like 0,-1). Weeks are processed in the exact order you provide.
-- Optional post-randomization to add slight natural variation to generated values.
-- Exclude specific rows from filling via --exclude, independent of strategy.
-- Reference support: supply a custom weekly CSV via --reference-file, or use the packaged default.
-- Supports different fill strategies like equal distribution, random distribution, copy_reference
+[![PyPI](https://img.shields.io/pypi/v/planta-filler)](https://pypi.org/project/planta-filler/)
+[![CI](https://github.com/d-solve-de/planta-automation/actions/workflows/ci.yml/badge.svg)](https://github.com/d-solve-de/planta-automation/actions/workflows/ci.yml)
+![Python](https://img.shields.io/pypi/pyversions/planta-filler)
+![License](https://img.shields.io/pypi/l/planta-filler)
 
-## Installation
+## Highlights
 
-### From PyPI (recommended)
+- **Three strategies:** `equal`, `random`, or `copy_reference` (reuse the proportions of a reference week).
+- **Any week, any days:** current, past or future weeks (`--week=-2,-1,0`, `--week 2024-W05`), selected weekdays only.
+- **Keeps what you protect:** exclude task rows (`--exclude 0,2`), add natural jitter (`--post-randomization 0.1`).
+- **Log in once:** a persistent Firefox profile remembers your session; later runs work headless, on a server or in a container.
+- **Build templates from real data:** `--export-reference` turns a manually filled week into a reference file.
+
+## Install
+
 ```bash
 pip3 install planta-filler
 ```
 
-### From Source
-```bash
-git clone https://github.com/d-solve-de/planta-automation.git
-cd planta-automation
-pip3 install -e .
-```
+You also need [Firefox](https://www.mozilla.org/firefox/) and
+[geckodriver](https://github.com/mozilla/geckodriver/releases) on your `PATH`.
+Details, including Docker/Podman images: [docs/installation.md](docs/installation.md).
 
-### Requirements
-- Python 3.8+
-- Firefox browser
-- geckodriver ([download](https://github.com/mozilla/geckodriver/releases))
-
-## Quick Start
+## Quick start
 
 ```bash
-# Run with defaults (fill current week Mon–Fri, equal strategy)
-python3 -m planta_filler --url https://your-planta-url.com/
+# 1. Log in once (a browser window opens; press ENTER in the terminal when the timesheet is visible)
+planta-filler --url https://planta.example.com/ --login-only
 
-# Process multiple weeks in order (current then last)
-python3 -m planta_filler --url https://your-planta-url.com/ --week=-1,-2,-3,-4 --strategy equal
+# 2. Fill the current week Monday–Friday, equal hours per task row
+planta-filler --url https://planta.example.com/
 
-# Process two previous weeks (two weeks ago, then last week)
-python3 -m planta_filler --url https://your-planta-url.com/ --week=-1,-2,-3,-4 --strategy equal
+# Fill last week and the week before with random values
+planta-filler --url https://planta.example.com/ --week=-2,-1 --strategy random
 
-# Add natural variation to generated values (post-randomization factor 0.2)
-python3 -m planta_filler --url https://your-planta-url.com/ --strategy equal --post-randomization 0.2
+# Copy the proportions of your own reference week, with slight variation
+planta-filler --url https://planta.example.com/ --strategy copy_reference \
+  --reference-file ~/planta/my_week.csv --post-randomization 0.1
 
-# Exclude rows 1 and 3 from filling (applies to all strategies)
-python3 -m planta_filler --url https://your-planta-url.com/ --strategy equal --exclude 1,3
-
-# Use a custom weekly reference file (full path)
-Reference file examples can be found in https://github.com/d-solve-de/planta-automation/tree/main/src/planta_filler/data
-
-python3 -m planta_filler --url https://your-planta-url.com/ --strategy copy_reference \
-  --reference-file /absolute/path/to/my_week_reference.csv
-
-# Show full manual
-python3 -m planta_filler --man
+# Reset Friday of the current week to zero
+planta-filler --url https://planta.example.com/ --reset --weekdays 4
 ```
 
-## Recommended Setup
+`python3 -m planta_filler ...` works the same as `planta-filler ...`.
+Run `planta-filler --man` for the full manual.
 
-- Use a reference file template given under https://github.com/d-solve-de/planta-automation/tree/main/src/planta_filler/data and adapt to your number of planta rows and your typical time management
-- Use
-```
-python3 -m planta_filler --url https://your-planta-url.com/ --strategy copy_reference --reference-file /absolute/path/to/my_week_reference.csv --post-randomization 0.0
-```
-## Main Functions
+## Documentation
 
-| Function | Module | Description |
-|----------|--------|-------------|
-| `main()` | cli.py | CLI entry point, argument parsing and orchestration |
-| `set_week()` | core.py | Fill hours for one or multiple weeks using specified strategy; preserves given order |
-| `reset_week()` | core.py | Reset all hours to zero for specified days |
-| `fill_day()` | calculations.py | Calculate hour distribution for a single day |
-| `distribute_equal()` | strategies.py | Equal distribution across all slots |
-| `distribute_random()` | strategies.py | Random distribution with scaling |
-| `copy_reference_day()` | strategies.py | Copy proportions from reference file |
-| `validate_all_inputs()` | validation.py | Validate all CLI inputs before execution |
-| `parse_week_spec()` | week_handler.py | Parse week specification (YYYY-WNN or offset) |
-| `ensure_reference_file()` | reference_handler.py | Auto-adapt reference file dimensions |
+| I want to… | Read |
+|---|---|
+| install it (pip, from source, Docker/Podman) | [docs/installation.md](docs/installation.md) |
+| fill my first week, step by step | [docs/tutorial-first-run.md](docs/tutorial-first-run.md) |
+| build my own reference week and reuse it | [docs/tutorial-reference-file.md](docs/tutorial-reference-file.md) |
+| solve a specific task (catch up, exclude rows, run on a schedule, …) | [docs/how-to.md](docs/how-to.md) |
+| look up an option | [docs/cli-reference.md](docs/cli-reference.md) |
+| understand the reference CSV format | [docs/reference-file-format.md](docs/reference-file-format.md) |
+| run it in Docker or Podman | [docs/docker.md](docs/docker.md) |
+| fix a problem | [docs/troubleshooting.md](docs/troubleshooting.md) |
+| understand or change the code | [docs/architecture.md](docs/architecture.md), [docs/development.md](docs/development.md) |
+| publish a new version to PyPI | [docs/releasing.md](docs/releasing.md) |
 
-## Automatic Reference File Dimension Adaptation
+The documentation index is at [docs/README.md](docs/README.md).
 
-**Yes**, the reference file is automatically adapted when the number of task rows in PLANTA changes:
+## How it works
 
-1. When `copy_reference` strategy is used, the system reads the current number of slots from PLANTA
-2. If the reference file has a different number of rows, it:
-   - Creates a backup of the old file (`.csv.bak`)
-   - Generates a new reference file with equal weights for all slots
-3. This ensures the script never fails due to dimension mismatch
+1. Firefox opens the PLANTA URL. With the default persistent profile you only log in once.
+2. For each requested week the tool reads the attendance hours ("Anwesend") of every day and the current value of every task cell.
+3. The chosen strategy computes a value per task row so that the day total matches the attendance hours; excluded rows are left untouched and reduce the budget.
+4. Each changed cell is typed into the page and blurred, which makes PLANTA save it.
+5. The browser stays open for `--close-delay` seconds so you can check the result.
 
-See `reference_handler.py` → `ensure_reference_file()` for implementation.
+Only the DOM selectors in `src/planta_filler/config.py` are PLANTA-specific.
 
----
+## Contributing
 
-## Typical Use Cases
+Bug reports and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and
+[docs/development.md](docs/development.md). Changes are tracked in [CHANGELOG.md](CHANGELOG.md).
 
-### 1. Daily Timesheet Filling
-Fill today's timesheet with equal distribution:
-```bash
-python3 -m planta_filler --url https://planta.example.com/ --weekdays $(date +%w)
-```
-
-### 2. Weekly Batch Fill
-Fill entire work week (Mon-Fri) at once:
-```bash
-python3 -m planta_filler --url https://planta.example.com/
-```
-
-### 3. Catch Up on Past Week
-Forgot to fill last week? Fill it retroactively:
-```bash
-python3 -m planta_filler --url https://planta.example.com/ --week=-1
-```
-
-### 4. Prepare Next Week
-Pre-fill next week's timesheet:
-```bash
-python3 -m planta_filler --url https://planta.example.com/ --week=1
-```
-
-### 5. Realistic-Looking Values
-Use random strategy for natural-looking distributions:
-```bash
-python3 -m planta_filler --url https://planta.example.com/ --strategy random
-```
-
-### 6. Consistent Patterns
-Use reference day for consistent project hour ratios:
-```bash
-python3 -m planta_filler --url https://planta.example.com/ --strategy copy_reference --reference-file /absolute/path/to/my_week_reference.csv
-```
-
-### 7. Clean Slate
-Reset all hours to zero before fresh entry:
-```bash
-python3 -m planta_filler --url https://planta.example.com/ --reset
-```
-
-### 8. Headless Server Automation
-Run on server without display:
-```bash
-python3 -m planta_filler --url https://planta.example.com/ --headless --persistent
-```
-
----
-
-## Parameter Reference with Examples
-
-### `--url URL`
-**Required.** PLANTA URL to access.
-
-```bash
-# Your company's PLANTA instance
-python3 -m planta_filler --url https://pze.company.com/
-
-# Test environment
-python3 -m planta_filler --url https://pze-test.company.com/
-```
-
-### `--strategy {equal,random,copy_reference}`
-Hour distribution strategy. Default: `equal`
-
-```bash
-# Equal distribution: 8h across 4 tasks → [2.0, 2.0, 2.0, 2.0]
-python3 -m planta_filler --url URL --strategy equal
-
-# Random distribution: 8h across 4 tasks → [1.5, 2.3, 2.1, 2.1]
-python3 -m planta_filler --url URL --strategy random
-
-# Copy from reference file with proportional scaling
-python3 -m planta_filler --url URL --strategy copy_reference \
-  --reference-file /absolute/path/to/my_week_reference.csv
-```
-
-### `--weekdays DAYS`
-Comma-separated weekdays (0=Mon, 6=Sun). Default: `0,1,2,3,4` (Mon-Fri)
-
-```bash
-# Monday only
-python3 -m planta_filler --url URL --weekdays 0
-
-# Mon, Wed, Fri
-python3 -m planta_filler --url URL --weekdays 0,2,4
-
-# Tuesday and Thursday
-python3 -m planta_filler --url URL --weekdays 1,3
-
-# Full week including weekend
-python3 -m planta_filler --url URL --weekdays 0,1,2,3,4,5,6
-
-# Today only (using shell command substitution)
-python3 -m planta_filler --url URL --weekdays $(python3 -c "from datetime import datetime; print(datetime.now().weekday())")
-```
-
-### `--week SPEC`
-Week(s) to process. Default: `0` (current week).
-
-Each `SPEC` can be:
-- Relative offset: `0` (current), `-1` (last), `1` (next), etc.
-- Absolute ISO week: `YYYY-WNN` (e.g. `2024-W05`).
-
-Multiple weeks are passed as a **single comma-separated string**. Use quotes or the `--week=...` form so the shell treats it as one argument. Internally, the CLI splits this string by comma.
-
-```bash
-# Current week
-python3 -m planta_filler --url URL --week=0
-
-# Last week
-python3 -m planta_filler --url URL --week=-1
-
-# Process current, then last week (in that order)
-python3 -m planta_filler --url URL --week=0,-1
-
-# Two weeks ago and last week
-python3 -m planta_filler --url URL --week=-2,-1
-
-# Using '=' syntax instead of quotes
-python3 -m planta_filler --url URL --week=-2,-1
-
-# Specific week (ISO format)
-python3 -m planta_filler --url URL --week 2024-W05
-```
-
-> Note: `--week -1,-2,-3` without quotes can be misinterpreted by the shell or by `argparse`. Always pass multiple week specs as a single argument, e.g. `--week="-1,-2,-3"` or `--week=-1,-2,-3`.
-
-### `--reset`
-Reset hours to 0 instead of filling. Default: false
-
-```bash
-# Reset current week
-python3 -m planta_filler --url URL --reset
-
-# Reset only Friday
-python3 -m planta_filler --url URL --reset --weekdays 4
-
-# Reset last week
-python3 -m planta_filler --url URL --reset --week=-1
-```
-
-### `--persistent`
-Use persistent Firefox profile to save login. Default: true
-
-```bash
-# First run: browser opens, you log in manually
-python3 -m planta_filler --url URL --persistent
-
-# Subsequent runs: already logged in
-python3 -m planta_filler --url URL --persistent
-
-# Force fresh login (no persistent profile)
-python3 -m planta_filler --url URL --no-persistent
-```
-
-Profile saved at: `~/.selenium_profiles/planta_firefox/`
-
-### `--headless`
-Run browser without visible window. Default: false
-
-```bash
-# Visible browser (watch automation)
-python3 -m planta_filler --url URL
-
-# Headless mode (background)
-python3 -m planta_filler --url URL --headless
-
-# Headless with persistent login (server automation)
-python3 -m planta_filler --url URL --headless --persistent
-```
-
-### `--post-randomization FLOAT`
-Post-randomization factor applied to generated values to add slight natural variation.
-Values in range [0.0, <1.0] are recommended.
-This parameter is passed to fill_day and applied in apply_fill_values.
-
-```bash
-# Small variation
-python3 -m planta_filler --url URL --strategy equal --post-randomization 0.1
-
-# No variation
-python3 -m planta_filler --url URL --strategy equal --post-randomization 0.0
-```
-
-### `--delay SECONDS`
-Delay between field updates. Default: `0.2`
-
-```bash
-# Fast (may miss fields on slow connections)
-python3 -m planta_filler --url URL --delay 0.05
-
-# Normal speed
-python3 -m planta_filler --url URL --delay 0.2
-
-# Slow (for unreliable networks)
-python3 -m planta_filler --url URL --delay 0.5
-
-# Very slow (debugging)
-python3 -m planta_filler --url URL --delay 1.0
-```
-
-### `--close-delay SECONDS`
-Seconds to wait before closing browser. Default: `10.0`
-
-```bash
-# Close immediately
-python3 -m planta_filler --url URL --close-delay 0
-
-# Quick verification
-python3 -m planta_filler --url URL --close-delay 5
-
-# Long verification time
-python3 -m planta_filler --url URL --close-delay 30
-
-# Very long (for manual review)
-python3 -m planta_filler --url URL --close-delay 60
-```
-
-### `--exclude INDICES`
-Comma-separated zero-based row indices to exclude from filling (independent of strategy). Applies to all processed days.
-
-```bash
-# Exclude rows 0 and 2
-python3 -m planta_filler --url URL --strategy equal --exclude 0,2
-
-# Combine with reference
-python3 -m planta_filler --url URL --strategy copy_reference --exclude 1,3 \
-  --reference-file /absolute/path/to/my_week_reference.csv
-```
-
-### `--reference-file PATH`
-Full path to a custom reference CSV. Supports both single-day (index + values) and whole-week format (index + weekday columns).
-The path is normalized (expands '~' and converts to absolute) to avoid accidental fallback to the default.
-Fallback behavior: if the file is missing/malformed/dimension-mismatched, the script logs the reason and falls back to equal proportions for that day.
-
-```bash
-# Use a weekly reference file located in your home directory
-python3 -m planta_filler --url URL --strategy copy_reference \
-  --reference-file /home/you/refs/planta_week.csv
-
-# macOS example
-python3 -m planta_filler --url URL --strategy copy_reference \
-  --reference-file /Users/you/refs/planta_week.csv
-```
-
-### `--man`
-Show detailed manual page.
-
-```bash
-python3 -m planta_filler --man
-```
-
----
-
-## Project Structure
-
-```
-planta-automation/
-├── src/
-│   └── planta_filler/
-│       ├── __init__.py       # Package initialization, exports
-│       ├── __main__.py       # Entry point: python3 -m planta_filler
-│       ├── cli.py            # Command-line interface
-│       ├── core.py           # Selenium browser control
-│       ├── calculations.py   # Day filling orchestration
-│       ├── strategies.py     # Distribution strategies
-│       ├── config.py         # Default configuration
-│       ├── validation.py     # Input validation
-│       ├── week_handler.py   # Week parsing
-│       ├── reference_handler.py  # Reference file management
-│       └── data/
-│           ├── man_page.txt
-│           └── default_reference.csv
-├── pyproject.toml           # Package configuration
-├── README.md
-├── LICENSE
-└── requirements.txt
-```
-
-## Data Flow
-
-```
-CLI args → main() → validate_all_inputs()
-                          ↓
-              start_driver() → Firefox
-                          ↓
-              set_week() / reset_week()
-                          ↓
-      get_hours_per_day() + get_target_hours_per_day()
-                          ↓
-                    fill_day()
-                          ↓
-         strategy function (equal/random/copy_reference)
-                          ↓
-              Selenium writes to input fields
-                          ↓
-                    end_driver()
-```
-
-## Configuration Reference
-
-Edit `src/planta_filler/config.py` to change defaults:
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `DEFAULT_URL` | `''` | PLANTA URL (empty = must specify) |
-| `DEFAULT_STRATEGY` | `'equal'` | Distribution strategy |
-| `DEFAULT_WEEKDAYS` | `[0,1,2,3,4]` | Mon-Fri |
-| `DEFAULT_DELAY` | `0.2` | Seconds between field updates |
-| `DEFAULT_CLOSE_DELAY` | `10.0` | Seconds before browser closes |
-| `DEFAULT_USE_PERSISTENT_PROFILE` | `True` | Save login between runs |
-| `DEFAULT_HEADLESS` | `False` | Run without visible browser |
-| `VALID_STRATEGIES` | `['random', 'equal', 'copy_reference']` | Available strategies |
-
-
-## Update pypi project
-
-Simply set a new version in Toml
-push cahnges to github
-set tag in git
-    git tag v0.1.1
-    git push origin v0.1.1
 ## License
 
-MIT License
-
-
+MIT, see [LICENSE](LICENSE).
