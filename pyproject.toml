@@ -1,17 +1,15 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "planta-filler"
-version = "0.1.2"
-description = "Selenium-based automation for PLANTA timesheet filling"
+dynamic = ["version"]
+description = "Selenium-based automation that fills PLANTA Pulse timesheets"
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = ">=3.8"
-authors = [
-    {name = "Felix Paul"}
-]
+requires-python = ">=3.9"
+authors = [{name = "Felix Paul"}]
 keywords = ["planta", "timesheet", "automation", "selenium"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -20,22 +18,23 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Office/Business",
 ]
-
 dependencies = [
-    "selenium>=4.0.0",
+    "selenium>=4.6",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0.0",
-    "black>=22.0.0",
+    "pytest>=7.0",
+    "ruff>=0.5",
+    "build>=1.0",
+    "twine>=5.0",
 ]
 
 [project.scripts]
@@ -43,7 +42,13 @@ planta-filler = "planta_filler.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/d-solve-de/planta-automation"
+Documentation = "https://github.com/d-solve-de/planta-automation/tree/main/docs"
 Repository = "https://github.com/d-solve-de/planta-automation"
+Changelog = "https://github.com/d-solve-de/planta-automation/blob/main/CHANGELOG.md"
+Issues = "https://github.com/d-solve-de/planta-automation/issues"
+
+[tool.setuptools.dynamic]
+version = {attr = "planta_filler.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -51,10 +56,19 @@ where = ["src"]
 [tool.setuptools.package-data]
 planta_filler = ["data/*.txt", "data/*.csv"]
 
-[tool.black]
-line-length = 100
-target-version = ['py38']
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["RUF001", "RUF003"]  # emoji / non-ASCII characters in messages are intentional
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+addopts = "-ra --doctest-modules"

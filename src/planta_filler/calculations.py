@@ -1,206 +1,123 @@
-# =============================================================================
-# calculations.py - Day Filling Orchestration
-# =============================================================================
-# This module orchestrates the hour distribution process for a single day.
-# It handles override mode, exclusion logic, and post-randomization to make
-# values look more natural.
-#
-# Value encoding:
-# - current_values: -1 = empty/blank cell, 0+ = existing value
-# - exclude_values: 1 = excluded (skip), 0 = include (fill)
-#
-# Main functions:
-# - fill_day(): Main orchestration function for filling a single day
-# - apply_fill_values(): Applies calculated values to correct positions
-#
-# Post-randomization:
-# When enabled, adds small random variations to make values look more natural
-# while ensuring the sum remains exactly equal to total_hours.
-# =============================================================================
+"""Turn a strategy result into the full list of values for one day.
 
-import copy
-import math
+Value encoding used throughout this module:
+
+* ``current_values[i] == -1`` means the cell is blank and may be filled.
+* any other value is an existing entry.
+* ``exclude_values[i] == 1`` marks a row that must never be touched.
+
+:func:`fill_day` decides which cells are free, asks the strategy for that many
+values and writes them back into the right positions. Rows that are kept
+(excluded or, without override, already filled) reduce the hours that are
+distributed so the day total still matches the target.
+"""
+
+from __future__ import annotations
+
 import random
-from .strategies import strategies
+from collections.abc import Sequence
 
-def apply_fill_values(current_values:list[float], exclude_values:list[int], fill_values:list[float], slots:int, post_randomization=0.2, precision:int=2):
-    # NOTE: post randomization applies to all values, also the excluded ones
+from .config import DEFAULT_PRECISION, DEFAULT_RETRIES
+from .strategies import STRATEGIES, enforce_exact_sum
+
+BLANK = -1
+
+
+def _free_slot_indices(working_values: Sequence[float], exclude_values: Sequence[int]) -> list[int]:
+    return [
+        i for i, (value, excluded) in enumerate(zip(working_values, exclude_values)) if value == BLANK and not excluded
+    ]
+
+
+def apply_post_randomization(values: Sequence[float], factor: float, precision: int = DEFAULT_PRECISION) -> list[float]:
+    """Jitter each value by up to ``factor`` of itself, keeping the exact sum.
+
+    ``factor`` must be in ``[0, 1)`` so values stay non-negative.
     """
-    Fill only positions where:
-      - current_values[i] == -1 (blank)
-      - exclude_values[i] == 0 (not excluded)
-    Leave excluded positions (exclude_values[i] == 1) untouched.
+    if not values or factor <= 0:
+        return list(values)
+    if factor >= 1:
+        raise ValueError(f"post_randomization must be below 1, got {factor}")
+    jittered = [v + factor * random.uniform(-v, v) for v in values]
+    return enforce_exact_sum(round(sum(values), precision), jittered, precision)
+
+
+def apply_fill_values(
+    current_values: Sequence[float],
+    exclude_values: Sequence[int],
+    fill_values: Sequence[float],
+    post_randomization: float = 0.0,
+    precision: int = DEFAULT_PRECISION,
+) -> list[float]:
+    """Place ``fill_values`` into the blank, non-excluded positions of ``current_values``."""
+    free = _free_slot_indices(current_values, exclude_values)
+    if len(free) != len(fill_values):
+        raise ValueError(f"{len(free)} free slots but {len(fill_values)} fill values were provided")
+    values = apply_post_randomization(fill_values, post_randomization, precision)
+    result = [max(0.0, float(v)) if v != BLANK else 0.0 for v in current_values]
+    for index, value in zip(free, values):
+        result[index] = max(0.0, round(value, precision))
+    return result
+
+
+def fill_day(
+    current_values: Sequence[float],
+    total_hours: float,
+    strategy: str = "equal",
+    *,
+    exclude_values: Sequence[int] | None = None,
+    override_mode: bool = True,
+    reference_day: Sequence[float] | None = None,
+    post_randomization: float = 0.0,
+    precision: int = DEFAULT_PRECISION,
+    retries: int = DEFAULT_RETRIES,
+) -> list[float]:
+    """Compute the values every task row of one day should end up with.
+
+    With ``override_mode`` every non-excluded row is rewritten. Without it only
+    blank rows (``-1``) are filled and existing entries are kept.
+
+    >>> fill_day([1.0, -1, -1, 2.0], 8.0, "equal", override_mode=False)
+    [1.0, 2.5, 2.5, 2.0]
+    >>> fill_day([2.0, 1.0, -1], 6.0, "equal")
+    [2.0, 2.0, 2.0]
+    >>> fill_day([2.0, -1, 1.0, -1], 10.0, "equal", exclude_values=[1, 0, 1, 0], override_mode=False)
+    [2.0, 3.5, 1.0, 3.5]
     """
-    res = copy.deepcopy(current_values)
-    if post_randomization:
-        assert post_randomization < 1, f"randomization parameter has to be lower than 1, so the values are guaranteed to be non-negative, got randomization parameter {post_randomization}"
-        random_values = [value + round((post_randomization * random.uniform(-value, value)), precision) for value in fill_values]  # add randomization to entries
-        # ensure values still add up to total at the given precision
-        target_sum = round(sum(fill_values), precision)
-        current_sum = round(sum(random_values), precision)
-        diff = round(target_sum - current_sum, precision)
-        smallest = 1 / (10 ** precision)
-        if abs(diff) >= smallest and len(random_values) > 0:
-            per = round(diff / len(random_values), precision)
-            random_values = [round(v + per, precision) for v in random_values]
-            current_sum = round(sum(random_values), precision)
-            diff = round(target_sum - current_sum, precision)
-            # apply remaining diff to a single slot (keep non-negative)
-            candidates = [i for i, v in enumerate(random_values) if v + diff >= 0]
-            idx = candidates[0] if candidates else 0
-            random_values[idx] = round(random_values[idx] + diff, precision)
-        assert math.isclose(sum(random_values), sum(fill_values), abs_tol=smallest), (
-            f"Post randomization failed - sum does not add up got {random_values} with sum {sum(random_values)} but should be {sum(fill_values)}"
-        )
-        fill_values = random_values
-    
-    fill_idx = 0
-    for i, (cv, ex) in enumerate(zip(res, exclude_values)):
-        if ex == 1:
-            continue  # skip excluded positions
-        if cv == -1:
-            if fill_idx >= len(fill_values):
-                raise ValueError(
-                    f"Not enough fill_values: needed {slots}, got {len(fill_values)}"
-                )
-            res[i] = max(fill_values[fill_idx], 0)
-            fill_idx += 1
-    assert fill_idx == slots, f"Expected to fill {slots} blanks, filled {fill_idx}"
-    res = [max(0.0,v) for v in res]
-    return res
+    if strategy not in STRATEGIES:
+        raise KeyError(f"strategy {strategy!r} not defined; choose one of {sorted(STRATEGIES)}")
+    if not all(isinstance(v, (int, float)) for v in current_values):
+        raise TypeError("current_values must contain numbers only")
 
-def fill_day(override_mode: bool, strategy: str, exclude_values: list[int], total_hours: float, current_values: list[float], retries: int, precision:int, reference_day = [], post_randomization=0):
-    """
-    looks up current values
-    gets user input
-    calculates values to be filled
-    and returns all values that should be in the column
-    
-    assert that current_values is given in the following form:
-    current_values = [1, 3, 2.5, -1, -1, 2.34, 0]
-    -1 := empty, not set
-    int := entry filled with the number
+    exclude = list(exclude_values) if exclude_values else [0] * len(current_values)
+    if len(exclude) != len(current_values):
+        raise ValueError(f"exclude_values has {len(exclude)} entries but current_values has {len(current_values)}")
 
-    override also uses the fill blanks only mode but with the blanks set accordingly
-
-    current_values = [1,2,3,4,5,6,-1, -1]
-    override_mode = True --> set all current values to -1:= empty cell
-    --> then follow same logic as override_mode = False
-    current_values = [-1,-1,-1,-1,-1,-1,-1, -1]
-    exclude_values = [1,0,0,0,1,1, 0,  1]
-
-    current_values = [1,2,3,4,5,6,-1, -1]
-    exclude_values = [1,0,0,0,1,1, 0,  1]
-    override_mode = False
-
-    --> slots = count how many cells are -1 in current values and 0 in exclude values
-    total_hours = total_hours - sum(current_values) where current_values != -1 # exclude already filled values
-    fill calculated values where current_values == -1 and exclude_values = 0
-
-
-    Test Cases:
-    1) Fill two blanks equally, no excludes:
-       total_hours = 8.0, current_values sum of filled = 3.0 -> distribute 5.0 over 2 slots
-       >>> fill_day(False, "equal", [], 8.0, [1.0, -1, -1, 2.0], retries=5, precision=2)
-       [1.0, 2.5, 2.5, 2.0]
-
-    2) Override and fill all positions equally:
-       override_mode=True sets all cells to -1, then 6.0 hours across 3 slots
-       >>> fill_day(True, "equal", [0, 0, 0], 6.0, [2.0, 1.0, -1], retries=5, precision=2)
-       [2.0, 2.0, 2.0]
-
-    3) Exclude some already-filled positions; fill only non-excluded blanks:
-       total_hours = 10.0, filled sum = 3.0 -> 7.0 over the 2 non-excluded blanks
-       exclude_values marks indices 0 and 2 as excluded (they are already filled)
-       >>> fill_day(False, "equal", [1, 0, 1, 0], 10.0, [2.0, -1, 1.0, -1], retries=5, precision=2)
-       [2.0, 3.5, 1.0, 3.5]
-
-    4) Copy from reference day over all 11 slots:
-       The mock reference day is [0, 0, 1, 2, 0.0, 0.0, 1, 1, 1, 1, 1] (negatives become 0).
-       Sum(ref) = 8, so with total_hours=8.0, values match the ref proportions.
-       >>> fill_day(False, "copy_reference", [1,1,1]+[0]*8, 8.0, [-1]*11, retries=5, precision=2, reference_day=[1]*11)
-       [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
-
-    5) Random strategy: check shape and sum (not exact values):
-       >>> res = fill_day(False, "random", [], 8.0, [-1, -1, -1, -1], retries=10, precision=2)
-       >>> len(res)
-       4
-       >>> round(sum(res), 2)
-       8.0
-
-    6) test post randomization
-    >>> math.isclose(sum(fill_day(False, "equal", [], 8.0, [1.0, -1, -1, 2.0], retries=5, precision=2, post_randomization=0.2)), 8)
-    True
-
-       total_hours = 10.0, filled sum = 3.0 -> 7.0 over the 2 non-excluded blanks
-       exclude_values marks indices 0 and 2 as excluded (they are already filled)
-       >>> res = fill_day(False, "equal", [1, 0, 1, 0], 10.0, [2.0, -1, 1.0, -1], retries=5, precision=2)
-       >>> len(res)
-       4
-       >>> round(sum(res), 2)
-       10.0
-       >>> res[0], res[2]
-       (2.0, 1.0)
-    """
-    assert all(isinstance(v, (int, float)) for v in current_values), "All values must be int or float"
-    
-    if exclude_values == []: # if no values should be excluded set exclude values all to zero
-        exclude_values = [0 for _ in range(len(current_values))]
-
-    assert len(current_values) == len(exclude_values), f"the len(current_values) = {len(current_values)} does not match len(exclude_values)= {len(exclude_values)}"
-    
-    # Build working view of current_values respecting excludes
-    working_current = list(current_values)
+    working = list(current_values)
     if override_mode:
-        # Override all non-excluded positions to blanks; keep excluded values intact
-        working_current = [(-1 if ex == 0 else cv) for cv, ex in zip(current_values, exclude_values)]
-     # slots: count entries that are blank (-1) and not excluded (0)
-    slots = sum(1 for cv, ex in zip(working_current, exclude_values) if cv == -1 and ex == 0)
+        working = [BLANK if not excluded else value for value, excluded in zip(working, exclude)]
 
-    # hours_to_distribute: subtract values we won't overwrite from total_hours
-    hours_to_distribute = total_hours - sum(v for v in working_current if v != -1)
-    hours_to_distribute = round(max(0.0, hours_to_distribute), precision)
-    
-    if strategy in strategies.keys():
-        pass
-    else:
-        raise KeyError(f"strategy {strategy} not defined")
-    # Compute the fill_values according to the strategy
-    if strategy == "equal":
-        fill_values = strategies['equal'](hours_to_distribute, slots, precision)
-    elif strategy == "random":
-        fill_values = strategies['random'](hours_to_distribute, slots, precision, retries)
-    elif strategy == "copy_reference":
-        try:
-            # reference day has to be cut away where exclude = 1
-            reference_day = [v if v >= 0 else 0.0 for v in reference_day]
-            applied_exclude_reference_day = [v for v, exc, current in zip(reference_day, exclude_values, working_current) if exc == 0 and current == -1]
-            fill_values = strategies['copy_reference'](hours_to_distribute, slots, applied_exclude_reference_day, precision)
-        except Exception as e:
-            fill_values = strategies['equal'](hours_to_distribute, slots, precision)
-    else:
-        raise ValueError(f"Strategy: {strategy} unknown")
+    free = _free_slot_indices(working, exclude)
+    kept_hours = sum(v for v in working if v != BLANK)
+    hours_to_distribute = round(max(0.0, total_hours - kept_hours), precision)
 
-    res = apply_fill_values(working_current, exclude_values, fill_values, slots, post_randomization, precision)
-    
-    # Normalize to UI precision: round each value and adjust residual so that sums match at precision
-    rounded = [max(0.0, round(v, precision)) for v in res]
-    target = round(total_hours, precision)
-    smallest = 1 / (10 ** precision)
-    residual = round(target - sum(rounded), precision)
-    if abs(residual) >= smallest and len(rounded) > 0:
-        # Adjust only a fillable index to absorb the residual (avoid changing excluded/originally filled)
-        fillable_indices = [i for i, (cv, ex) in enumerate(zip(working_current, exclude_values)) if cv == -1 and ex == 0]
-        if fillable_indices:
-            # Prefer the largest of the fillable values
-            idx = max(fillable_indices, key=lambda i: rounded[i])
-            if rounded[idx] + residual < 0:
-                candidates = [i for i in fillable_indices if rounded[i] + residual >= 0]
-                if candidates:
-                    idx = candidates[0]
-            rounded[idx] = round(rounded[idx] + residual, precision)
-        # else: no fillable indices; skip residual adjustment to avoid modifying excluded values
-    assert math.isclose(target, sum(rounded), abs_tol=smallest), (
-        f"post fixing the sum failed - sum does not add up got {rounded} with sum {sum(rounded)} but should be {target}"
-    )
-    return rounded
+    if not free:
+        return [max(0.0, float(v)) for v in working]
+
+    if strategy == "copy_reference":
+        fill_values = _copy_reference_fill(hours_to_distribute, free, reference_day, precision)
+    else:
+        fill_values = STRATEGIES[strategy](hours_to_distribute, len(free), precision=precision, retries=retries)
+
+    return apply_fill_values(working, exclude, fill_values, post_randomization, precision)
+
+
+def _copy_reference_fill(
+    hours: float, free: list[int], reference_day: Sequence[float] | None, precision: int
+) -> list[float]:
+    """Use the reference proportions of the free rows; fall back to equal if unusable."""
+    if reference_day is not None and len(reference_day) > max(free):
+        trimmed = [max(0.0, float(reference_day[i])) for i in free]
+        if sum(trimmed) > 0:
+            return STRATEGIES["copy_reference"](hours, len(free), trimmed, precision=precision)
+    return STRATEGIES["equal"](hours, len(free), precision=precision)

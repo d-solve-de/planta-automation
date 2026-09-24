@@ -1,158 +1,121 @@
 NAME
-    planta-filler - Automatic timesheet filling for PLANTA
+    planta-filler {version} - automatic timesheet filling for PLANTA Pulse
 
 SYNOPSIS
-    python planta_filler.py [OPTIONS]
+    planta-filler --url URL [OPTIONS]
+    python3 -m planta_filler --url URL [OPTIONS]
 
 DESCRIPTION
-    Automates filling timesheets in PLANTA by distributing working hours
-    across tasks according to configurable strategies. Reads target hours
-    from the 'Anwesend' column and fills input fields automatically.
+    Opens the PLANTA timesheet in Firefox, reads the attendance hours
+    ("Anwesend") of every selected day and distributes them over the task
+    rows according to a strategy. Cells are typed into the page exactly as
+    you would do by hand, so PLANTA saves them the usual way.
 
 OPTIONS
+  What to fill
     --url URL
-        PLANTA URL to access
-        Default: {default_url}
+        PLANTA URL. Default: {default_url}
 
-    --strategy STRATEGY
-        Hour distribution strategy. One of:
-          random       - Random distribution with variance
-          equal        - Equal distribution across all tasks
-          copy_reference - Copy pattern from reference day
+    --week SPEC[,SPEC...]
+        Week(s) to process, in the given order. Each SPEC is a relative
+        offset (0 = current week, -1 = last week, 1 = next week) or an ISO
+        week such as 2024-W05. Pass several weeks as ONE argument, e.g.
+        --week=-2,-1,0 (the "=" avoids the shell or argparse treating "-2"
+        as an option). Default: {default_week}
+
+    --weekdays DAYS
+        Comma-separated weekdays: 0=Mon 1=Tue 2=Wed 3=Thu 4=Fri 5=Sat 6=Sun.
+        Default: {default_weekdays}
+
+    --exclude INDICES
+        Zero-based task row indices that are never changed, for filling as
+        well as for --reset. Example: --exclude 0,2
+
+  How to fill
+    --strategy NAME
+        equal          the same amount for every row
+        random         random amounts that add up to the day total
+        copy_reference the proportions of a reference CSV (see FILES)
         Default: {default_strategy}
 
-    --weekdays WEEKDAYS
-        Comma-separated list of weekdays to process
-        Format: 0,1,2,3,4
-        Weekday codes:
-          0 = Monday
-          1 = Tuesday
-          2 = Wednesday
-          3 = Thursday
-          4 = Friday
-          5 = Saturday
-          6 = Sunday
-        Default: {default_weekdays} (Monday-Friday)
+    --reference-file PATH
+        Reference CSV for copy_reference. Whole-week files have one column
+        per weekday; a file with a single value column applies to every
+        weekday. If the file is missing, malformed or has a different
+        number of rows than PLANTA, the affected days fall back to equal
+        weights and a warning is printed. Default: the packaged example.
 
-    --week WEEK
-        Week(s) to process. Format: YYYY-WNN or relative offset (comma-separated)
-        Examples: 2024-W05, -1 (last week), 0 (current week), 0,-1 (current then last)
-        Preserves the order you provide and navigates between weeks accordingly.
-        Default: current week
+    --post-randomization FACTOR
+        Jitter every value by up to FACTOR of itself (0.0 <= FACTOR < 1.0)
+        while keeping the exact day total. Default: {default_post_randomization}
 
     --reset
-        Reset hours to 0 instead of filling. Applies only to the specified week(s) and respects --exclude.
-        Default: false (fill mode)
+        Set the selected cells to 0 instead of filling them.
 
-    --persistent
-        Use persistent Firefox profile to save login between sessions
-        Profile location: ~/.selenium_profiles/planta_firefox/
+    --export-reference PATH
+        Write the values currently shown in PLANTA for the selected week to
+        PATH as a whole-week reference CSV, then exit without changing
+        anything. A convenient way to turn a manually filled week into a
+        template for copy_reference.
+
+  Browser
+    --persistent / --no-persistent
+        Keep cookies and the login in a Firefox profile so you only have
+        to log in once. Profile: {profile_dir}
         Default: {default_persistent}
 
     --headless
-        Run browser in headless mode (no visible window)
+        Run Firefox without a window. Requires an already logged-in
+        persistent profile because nobody can type the password.
         Default: {default_headless}
 
     --delay SECONDS
-        Delay between field updates in seconds
+        Pause between two field updates. Increase it on slow connections.
         Default: {default_delay}
 
-    --exclude INDICES
-        Comma-separated zero-based row indices to exclude from filling/resets
-        Example: --exclude 0,2,4
-
-    --reference-file PATH
-        Full path to a reference CSV (single-day or whole-week). Used with copy_reference.
-        If missing/malformed/mismatched, falls back to equal for the day and logs the reason.
-
     --close-delay SECONDS
-        Delay before closing browser (time to verify changes)
-        Default: {default_close_delay}
+        Keep the browser open this long after the run so you can check the
+        result. Default: {default_close_delay}
 
-    --help, -h
-        Show help message and exit
+  Output
+    -v, --verbose   show debug output
+    -q, --quiet     show only warnings and errors
+    --version       print the version and exit
+    --man           show this manual page and exit
+    -h, --help      show the short help and exit
 
-    --man
-        Show this manual page
-
-EXAMPLES
-    Basic usage with defaults (fill Mon-Fri with equal strategy):
-        python3 planta_filler.py
-
-    Fill with random noise distribution:
-        python3 planta_filler.py --strategy random_noise
-
-    Fill only Monday, Wednesday, Friday:
-        python3 planta_filler.py --weekdays 0,2,4
-
-    Reset current week to zero:
-        python3 planta_filler.py --reset
-
-    Fill last week:
-        python3 planta_filler.py --week -1
-
-    Use persistent profile (saves login):
-        python3 planta_filler.py --persistent
-
-    Run in headless mode:
-        python3 planta_filler.py --headless
-
-STRATEGIES
-    random
-        Distributes hours randomly with ~40% variance around equal
-        distribution. Creates realistic-looking timesheets.
-        Example: 8h across 4 tasks -> [1.5h, 2.3h, 2.1h, 2.1h]
-
-    equal
-        Distributes hours equally across all tasks.
-        Example: 8h across 4 tasks -> [2.0h, 2.0h, 2.0h, 2.0h]
-
-    copy_reference
-        Copies the percentage distribution from a reference day.
-        Useful for maintaining consistent patterns.
-        Example: Reference [2h, 4h, 2h] (25%, 50%, 25%)
-                 New 10h -> [2.5h, 5.0h, 2.5h]
-                 
-PERSISTENT PROFILE
-    Using --persistent saves cookies and login sessions in:
-        ~/.selenium_profiles/planta_firefox/
-    
-    First run: Login manually
-    Subsequent runs: Automatically logged in
+LOGIN
+    On the first run a browser window opens and the program waits for you to
+    log in. Press ENTER in the terminal once the timesheet is visible. With
+    --persistent (the default) the session is stored and later runs, also
+    headless ones, start directly.
 
 FILES
-    ~/.selenium_profiles/planta_firefox/
-        Firefox profile directory (when using --persistent)
+    {profile_dir}
+        Firefox profile used with --persistent.
 
-    config.py
-        Default configuration values
-
-    planta_selectors.yaml
-        CSS selectors for PLANTA DOM elements
-
-    default_reference.csv
-        Reference hour distributions for copy_reference strategy
-
-REQUIREMENTS
-    - Python 3.7+
-    - selenium
-    - pyyaml
-    - Firefox browser
-    - geckodriver (Firefox WebDriver)
+    Reference CSV (copy_reference), whole-week format:
+        ,Mo,Di,Mi,Do,Fr
+        1,6.00,4.00,3.00,2.00,0.00
+        2,1.00,1.00,2.00,2.00,0.00
+    The first column is a row index and is ignored. Labels may be German or
+    English, abbreviated or full. Values are weights: only their ratio per
+    day matters, the day total always comes from PLANTA.
 
 EXIT STATUS
-    0   Success
-    1   Error occurred
+    0   success
+    1   the run failed (browser, login, PLANTA page)
+    2   invalid arguments
 
 TROUBLESHOOTING
-    "selenium.common.exceptions.WebDriverException"
-        Install geckodriver: https://github.com/mozilla/geckodriver/releases
+    "Could not start Firefox"
+        Install Firefox and geckodriver and put geckodriver on your PATH.
+    "The page title ... does not look like PLANTA Pulse"
+        Check the URL; connect to the VPN if PLANTA is only reachable there.
+    "The timesheet did not appear"
+        You are not logged in. Run once without --headless and log in.
+    Values are not saved
+        Increase --delay (e.g. --delay 0.5).
 
-    Fields not updating:
-        Increase --delay value (e.g., --delay 0.3)
-
-    Login not saved:
-        Use --persistent flag
-
-COPYRIGHT
-    MIT License
+SEE ALSO
+    https://github.com/d-solve-de/planta-automation

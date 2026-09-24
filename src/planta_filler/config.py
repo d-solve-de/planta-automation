@@ -1,54 +1,72 @@
-# =============================================================================
-# config.py - Central Configuration for PLANTA Filler
-# =============================================================================
-# This module is the single source of truth for all default configuration
-# values used throughout the application. Modify these values to change
-# default behavior without touching the code.
-#
-# Configuration includes:
-# - PLANTA URL and connection settings
-# - Distribution strategy defaults
-# - Browser automation timing
-# - CSS selectors for PLANTA DOM elements
-# =============================================================================
+"""Central configuration: defaults, limits and PLANTA DOM selectors.
+
+Every tunable value lives here so behaviour can be changed without touching
+the logic modules. The CLI reads the ``DEFAULT_*`` values for its argument
+defaults, the browser layer reads ``SELECTORS``.
+"""
+
+from __future__ import annotations
 
 from pathlib import Path
 
-DEFAULT_URL = ''
-DEFAULT_STRATEGY = 'random'
-DEFAULT_WEEKDAYS = [0, 1, 2, 3, 4]
-DEFAULT_DELAY = 0.2
-DEFAULT_CLOSE_DELAY = 10.0
+# --- Paths -----------------------------------------------------------------
+
+PACKAGE_DIR = Path(__file__).resolve().parent
+DATA_DIR = PACKAGE_DIR / "data"
+DEFAULT_REFERENCE_FILE = str(DATA_DIR / "default_reference.csv")
+MAN_PAGE_FILE = DATA_DIR / "man_page.txt"
+PROFILE_DIR = Path.home() / ".selenium_profiles" / "planta_firefox"
+
+# --- CLI defaults ------------------------------------------------------------
+
+DEFAULT_URL = ""
+DEFAULT_STRATEGY = "equal"
+DEFAULT_WEEKDAYS = [0, 1, 2, 3, 4]  # Monday .. Friday
+DEFAULT_WEEK = "0"  # current ISO week
+DEFAULT_DELAY = 0.2  # seconds between two field updates
+DEFAULT_CLOSE_DELAY = 10.0  # seconds the browser stays open after the run
 DEFAULT_USE_PERSISTENT_PROFILE = True
 DEFAULT_HEADLESS = False
-# Absolute path to the packaged default reference CSV (whole-week format)
-DEFAULT_REFERENCE_FILE = str((Path(__file__).parent / 'data' / 'default_reference.csv').resolve())
-DEFAULT_EXCLUDE_VALUES = []
-DEFAULT_PRECISION = 2
-DEFAULT_RETRIES = 5
 DEFAULT_POST_RANDOMIZATION = 0.0
-VALID_STRATEGIES = ['random', 'equal', 'copy_reference']
+DEFAULT_PRECISION = 2  # decimals PLANTA accepts in an hours field
+DEFAULT_RETRIES = 5  # attempts for the random strategy before giving up
+
+# --- Validation limits -----------------------------------------------------
+
+VALID_STRATEGIES = ["equal", "random", "copy_reference"]
 VALID_WEEKDAYS = [0, 1, 2, 3, 4, 5, 6]
-MAX_DELAY = 60.0
 MIN_DELAY = 0.0
+MAX_DELAY = 60.0
+MAX_PRECISION = 10
+
+WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+# --- Browser / DOM ---------------------------------------------------------
+
+# Substring expected in the page title once the correct PLANTA instance is open.
+EXPECTED_TITLE_SUBSTRING = "planta pulse"
 
 SELECTORS = {
-    'selectors': {
-        'hours_input': 'input.load-input',
-        'target_hours_div': 'div.load[class*="att-"]',
+    "selectors": {
+        # One input per task row and day; its id ends with the ISO date.
+        "hours_input": "input.load-input",
+        # Per-day box carrying the attendance ("Anwesend") hours; the date is
+        # encoded in a class named ``att-YYYYMMDD``.
+        "target_hours_div": 'div.load[class*="att-"]',
     },
-    'patterns': {
-        'date_attr_regex': r'att-(\d{8})',
+    "patterns": {
+        "date_attr_regex": r"att-(\d{8})",
+        "field_id_date_regex": r"(\d{4}-\d{2}-\d{2})$",
     },
-    'timeouts': {
-        'presence_seconds': 10,
+    "timeouts": {
+        # Seconds to wait for the timesheet inputs after opening the URL.
+        "presence_seconds": 10,
+        # Seconds to wait for the inputs after the user confirmed a manual login.
+        "after_login_seconds": 60,
     },
-    'navigation': {
-        # These arrows navigate by whole weeks in PLANTA
-        'week_back': 'i.fas.fa-chevron-left',
-        'week_forward': 'i.fas.fa-chevron-right',
-        'today_button': 'div.label:contains("Heute")',
-        # Date picker input to validate visible week
-        'week_picker_input': 'a.date-picker-input input.flatpickr-input',
+    "navigation": {
+        # These arrows move the visible timesheet by one whole week.
+        "week_back": "i.fas.fa-chevron-left",
+        "week_forward": "i.fas.fa-chevron-right",
     },
 }

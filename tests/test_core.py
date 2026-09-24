@@ -1,269 +1,193 @@
 from datetime import datetime
 
-import types
+import pytest
 
+from planta_filler import core
+from planta_filler.browser import PlantaPage
 from planta_filler.core import (
-    get_target_hours_per_day,
-    get_hours_per_day,
-    filter_dates_by_weekdays,
-    set_week,
-    reset_week,
+    RunOptions,
+    export_visible_week,
+    fill_visible_week,
+    iter_weeks,
+    open_timesheet,
+    reset_visible_week,
+    run,
 )
-from planta_filler.config import SELECTORS
-from planta_filler.week_handler import parse_week_spec
+from planta_filler.exceptions import LoginRequiredError, ReferenceFileError
+from planta_filler.reference_handler import load_reference_week
+from tests.conftest import FakeDriver, hours_element, target_element
+
+MON, TUE = "2024-01-01", "2024-01-02"
 
 
-class FakeElement:
-    def __init__(self, id=None, value="", class_attr="", text=""):
-        self._id = id
-        self.value = value
-        self._class = class_attr
-        self.text = text
-        self.update_calls = 0
-        self.clears = 0
-
-    def get_attribute(self, name):
-        if name == "id":
-            return self._id
-        if name == "class":
-            return self._class
-        return None
-
-    def is_displayed(self):
-        return True
-
-    def is_enabled(self):
-        return True
-
-    def clear(self):
-        self.clears += 1
-        self.value = ""
-
-    def send_keys(self, s):
-        self.update_calls += 1
-        self.value = str(s)
+@pytest.fixture(autouse=True)
+def no_sleep(monkeypatch):
+    monkeypatch.setattr(core.time, "sleep", lambda s: None)
 
 
-class FakeDriver:
-    def __init__(self, hours_elements, target_elements):
-        self.hours_elements = hours_elements
-        self.target_elements = target_elements
-        # index by id for quick lookup in set_week()
-        self._by_id = {e._id: e for e in hours_elements if e._id}
-        self.last_url = None
-        # navigation support
-        self.clicks = {SELECTORS['navigation']['week_back']: 0, SELECTORS['navigation']['week_forward']: 0}
-
-    def get(self, url):
-        self.last_url = url
-
-    def quit(self):
-        pass
-
-    def find_elements(self, by, selector):
-        if selector == SELECTORS['selectors']['hours_input']:
-            return self.hours_elements
-        if selector == SELECTORS['selectors']['target_hours_div']:
-            return self.target_elements
-        return []
-
-    def find_element(self, by, sel_or_id):
-        # Ignore 'by' in the fake driver; decide based on the selector/id value.
-        # If sel_or_id matches a known navigation CSS selector, return a clickable stub.
-        if isinstance(sel_or_id, str) and sel_or_id in self.clicks:
-            return Clickable(self.clicks, sel_or_id)
-        # Otherwise, treat sel_or_id as an element ID.
-        return self._by_id[sel_or_id]
-
-    def execute_script(self, script, element):
-        # Only used as: "return arguments[0].value;"
-        return element.value
+@pytest.fixture(autouse=True)
+def fixed_today(monkeypatch):
+    monkeypatch.setattr(core, "week_offset_from_today", lambda spec: core_week_offset(spec))
 
 
-class DummyWait:
-    def __init__(self, driver, timeout):
-        self.driver = driver
-        self.timeout = timeout
+def core_week_offset(spec):
+    from planta_filler.week_handler import week_offset_from_today
 
-    def until(self, condition):
-        return True
+    return week_offset_from_today(spec, datetime(2024, 1, 3))
 
 
-def make_target_element(date_str, hours_text):
-    # date_str in YYYY-MM-DD; core expects class with att-YYYYMMDD
-    ymd = date_str.replace("-", "")
-    return FakeElement(class_attr=f"something att-{ymd} other", text=hours_text)
-
-
-def make_hours_element(field_id, val):
-    return FakeElement(id=field_id, value=str(val))
-
-
-def test_get_target_hours_per_day_parses_values(monkeypatch):
-    date = "2024-01-01"
-    # text may contain commas; function replaces with dot and extracts first number
-    target_elems = [
-        make_target_element(date, "Anwesend: 8,0 h"),
-        # unrelated element without matching class won't be used
-        FakeElement(class_attr="no-att", text="5,0 h"),
-    ]
-    driver = FakeDriver(hours_elements=[], target_elements=target_elems)
-    res = get_target_hours_per_day(driver)
-    assert res == {date: 8.0}
-
-
-def test_get_hours_per_day_groups_by_date():
-    date1 = "2024-01-01"
-    date2 = "2024-01-02"
-    hours_elems = [
-        make_hours_element(f"load-field-xxx-{date1}", "1.0"),
-        make_hours_element(f"load-field-yyy-{date1}", ""),  # blank -> 0.0
-        make_hours_element(f"load-field-zzz-{date2}", "2.5"),
-    ]
-    driver = FakeDriver(hours_elements=hours_elems, target_elements=[])
-    res = get_hours_per_day(driver)
-    assert set(res.keys()) == {date1, date2}
-    assert res[date1][0][0].endswith(date1)
-    assert [v for _, v in res[date1]] == [1.0, 0.0]
-    assert [v for _, v in res[date2]] == [2.5]
-
-
-def test_filter_dates_by_weekdays():
-    dates = ["2024-01-01", "2024-01-02", "2024-01-03"]  # Tue, Wed, Thu
-    # Select Wednesday only (2)
-    filtered = filter_dates_by_weekdays(dates, [2])
-    # Map to ISO weekday numbers to confirm
-    assert [datetime.strptime(d, "%Y-%m-%d").weekday() for d in filtered] == [2]
-
-
-class Clickable:
-    def __init__(self, clicks_store, key):
-        self._store = clicks_store
-        self._key = key
-
-    def click(self):
-        self._store[self._key] += 1
-
-
-def test_set_week_applies_changes_equal_strategy(monkeypatch):
-    # Monkeypatch WebDriverWait to avoid waiting
-    from planta_filler import core as core_mod
-    monkeypatch.setattr(core_mod, "WebDriverWait", DummyWait)
-    monkeypatch.setattr(core_mod, "_assert_planta_pulse_title", lambda d: None)
-
-    date1 = "2024-01-01"
-    date2 = "2024-01-02"
-
-    hours_elems = [
-        # date1: two slots, both 0 -> expect both set to 2.0 when target is 4.0
-        make_hours_element(f"load-field-a-{date1}", "0.0"),
-        make_hours_element(f"load-field-b-{date1}", "0.0"),
-        # date2: three slots, current values 1.0, 0.0, 0.5 -> expect to set to 1.0 each (target 3.0)
-        make_hours_element(f"load-field-c-{date2}", "1.0"),
-        make_hours_element(f"load-field-d-{date2}", "0.0"),
-        make_hours_element(f"load-field-e-{date2}", "0.5"),
-    ]
-
-    target_elems = [
-        make_target_element(date1, "Anwesend: 4,0 h"),
-        make_target_element(date2, "Anwesend: 3,0 h"),
-    ]
-
-    driver = FakeDriver(hours_elements=hours_elems, target_elements=target_elems)
-
-    # Run set_week in override mode (skip_login_prompt=True) to avoid input waiting, and with zero delays
-    set_week(
-        driver,
-        url="https://example.com",
-        strategy="equal",
-        weekdays=None,
-        skip_login_prompt=True,
-        delay=0.0,
-        close_delay=0.0,
-        post_randomization=0.0,
-        week_specs=["0"],
+def two_day_driver():
+    return FakeDriver(
+        hours_elements=[
+            hours_element(MON, "a", "0.0"),
+            hours_element(MON, "b", "0.0"),
+            hours_element(TUE, "c", "1.0"),
+            hours_element(TUE, "d", "0.0"),
+            hours_element(TUE, "e", "0.5"),
+        ],
+        target_elements=[target_element(MON, "Anwesend: 4,0 h"), target_element(TUE, "Anwesend: 3,0 h")],
     )
 
-    # Count updates applied via send_keys across all elements
-    total_updates = sum(e.update_calls for e in hours_elems)
-    # date1: 2 updates; date2: 2 updates (elements d and e), element c remains ~1.0
-    assert total_updates == 4
-    # Verify final values reflect the strategy results
-    # date1 -> [2.0, 2.0]
-    assert [e.value for e in hours_elems[:2]] == ["2.0", "2.0"]
-    # date2 -> [1.0, 1.0, 1.0]
-    assert [e.value for e in hours_elems[2:]] == ["1.0", "1.0", "1.0"]
+
+def test_fill_visible_week_equal_strategy():
+    driver = two_day_driver()
+    changes = fill_visible_week(PlantaPage(driver), RunOptions(url="u", strategy="equal", delay=0))
+    assert changes == 4  # c already holds 1.0
+    assert [e.value for e in driver.hours_elements[:2]] == ["2.0", "2.0"]
+    assert [e.value for e in driver.hours_elements[2:]] == ["1.0", "1.0", "1.0"]
 
 
-def test_reset_week_sets_zero_values(monkeypatch):
-    # Monkeypatch WebDriverWait and input to avoid waiting
-    from planta_filler import core as core_mod
-    monkeypatch.setattr(core_mod, "WebDriverWait", DummyWait)
-    monkeypatch.setattr(core_mod, "_assert_planta_pulse_title", lambda d: None)
-    # Patch builtins.input used in reset_week
-    import builtins
-    monkeypatch.setattr(builtins, "input", lambda *args, **kwargs: "")
+def test_fill_visible_week_respects_weekdays_and_excludes():
+    driver = two_day_driver()
+    options = RunOptions(url="u", strategy="equal", weekdays=[1], exclude_indices=[0], delay=0)
+    fill_visible_week(PlantaPage(driver), options)
+    assert [e.value for e in driver.hours_elements[:2]] == ["0.0", "0.0"]  # Monday untouched
+    assert driver.hours_elements[2].value == "1.0"  # excluded row keeps its value
+    assert [e.value for e in driver.hours_elements[3:]] == ["1.0", "1.0"]
 
-    date1 = "2024-01-01"
-    date2 = "2024-01-02"
-    hours_elems = [
-        make_hours_element(f"load-field-a-{date1}", "1.25"),
-        make_hours_element(f"load-field-b-{date1}", "0.75"),
-        make_hours_element(f"load-field-c-{date2}", "3.00"),
-    ]
-    driver = FakeDriver(hours_elements=hours_elems, target_elements=[])
 
-    reset_week(
-        driver,
-        url="https://example.com",
-        weekdays=None,
-        delay=0.0,
-        close_delay=0.0,
+def test_fill_visible_week_skips_days_without_target():
+    driver = FakeDriver(hours_elements=[hours_element(MON, "a", "0.0")], target_elements=[target_element(MON, "0")])
+    assert fill_visible_week(PlantaPage(driver), RunOptions(url="u", delay=0)) == 0
+
+
+def test_fill_visible_week_copy_reference(tmp_path):
+    ref = tmp_path / "ref.csv"
+    ref.write_text(",Mo,Di\n1,3,1\n2,1,1\n3,0,0\n")
+    driver = FakeDriver(
+        hours_elements=[hours_element(MON, "a", "0"), hours_element(MON, "b", "0"), hours_element(MON, "c", "0")],
+        target_elements=[target_element(MON, "8")],
     )
-
-    # All elements should be set to '0'
-    assert [e.value for e in hours_elems] == ["0", "0", "0"]
-    # And send_keys should have been called for each element
-    assert sum(e.update_calls for e in hours_elems) == 3
+    options = RunOptions(url="u", strategy="copy_reference", reference_file=str(ref), delay=0)
+    fill_visible_week(PlantaPage(driver), options, load_reference_week(ref))
+    assert [e.value for e in driver.hours_elements] == ["6.0", "2.0", "0"]  # unchanged cell keeps its text
 
 
-def test_set_week_multiple_specs_navigate_and_fill(monkeypatch):
-    # Monkeypatch WebDriverWait to avoid waiting
-    from planta_filler import core as core_mod
-    monkeypatch.setattr(core_mod, "WebDriverWait", DummyWait)
-    monkeypatch.setattr(core_mod, "_assert_planta_pulse_title", lambda d: None)
-
-    # Prepare hours/targets; same DOM used for both weeks in our fake driver
-    dateA = "2024-01-01"
-    dateB = "2024-01-02"
-
-    hours_elems = [
-        make_hours_element(f"load-field-a-{dateA}", "0.0"),
-        make_hours_element(f"load-field-b-{dateA}", "0.0"),
-        make_hours_element(f"load-field-c-{dateB}", "0.0"),
-    ]
-
-    target_elems = [
-        make_target_element(dateA, "Anwesend: 2,0 h"),
-        make_target_element(dateB, "Anwesend: 1,0 h"),
-    ]
-
-    driver = FakeDriver(hours_elements=hours_elems, target_elements=target_elems)
-
-    # Week specs include current (0) and previous (-1); the code should click back arrow once to move to previous week
-    set_week(
-        driver,
-        url="https://example.com",
-        strategy="equal",
-        weekdays=None,
-        skip_login_prompt=True,
-        delay=0.0,
-        close_delay=0.0,
-        post_randomization=0.0,
-        week_specs=["0", "-1"],
+def test_fill_visible_week_copy_reference_falls_back_on_mismatch(tmp_path, caplog):
+    ref = tmp_path / "ref.csv"
+    ref.write_text(",Mo\n1,3\n")  # 1 row, PLANTA has 2
+    driver = FakeDriver(
+        hours_elements=[hours_element(MON, "a", "0"), hours_element(MON, "b", "0")],
+        target_elements=[target_element(MON, "8")],
     )
+    options = RunOptions(url="u", strategy="copy_reference", reference_file=str(ref), delay=0)
+    fill_visible_week(PlantaPage(driver), options, load_reference_week(ref))
+    assert [e.value for e in driver.hours_elements] == ["4.0", "4.0"]
+    assert "falling back to equal" in caplog.text
 
-    # Verify that navigation clicked 1 time to go to the previous week
-    assert driver.clicks[SELECTORS['navigation']['week_back']] == 1
-    # And elements were filled twice (once per week). In this fake environment, we see cumulative updates
-    assert sum(e.update_calls for e in hours_elems) >= 3
+
+def test_load_reference_handles_unusable_file(tmp_path, caplog):
+    options = RunOptions(url="u", strategy="copy_reference", reference_file=str(tmp_path / "missing.csv"))
+    assert core.load_reference(options) is None
+    assert "falls back to equal" in caplog.text
+    assert core.load_reference(RunOptions(url="u", strategy="equal")) is None
+    assert core.load_reference(RunOptions(url="u", strategy="copy_reference")) is not None
+
+
+def test_reset_visible_week_zeroes_non_excluded_cells():
+    driver = FakeDriver(
+        hours_elements=[
+            hours_element(MON, "a", "1.25"),
+            hours_element(MON, "b", "0.75"),
+            hours_element(TUE, "c", "3.00"),
+        ]
+    )
+    changes = reset_visible_week(PlantaPage(driver), RunOptions(url="u", exclude_indices=[1], delay=0))
+    assert changes == 2
+    assert [e.value for e in driver.hours_elements] == ["0.0", "0.75", "0.0"]
+
+
+def test_iter_weeks_navigates_relative_to_current_week():
+    driver = FakeDriver()
+    page = PlantaPage(driver)
+    assert list(iter_weeks(page, ["0", "-2", "1"])) == ["0", "-2", "1"]
+    assert driver.back_clicks == 2
+    assert driver.forward_clicks == 3
+
+
+def test_open_timesheet_prompts_for_login_when_interactive(monkeypatch):
+    driver = FakeDriver()
+    page = PlantaPage(driver)
+    prompts = []
+
+    def fake_input(*_):
+        prompts.append(1)
+        driver.hours_elements.append(hours_element(MON, "a", "0"))
+        return ""
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    monkeypatch.setitem(core.SELECTORS["timeouts"], "presence_seconds", 0.05)
+    monkeypatch.setitem(core.SELECTORS["timeouts"], "after_login_seconds", 0.5)
+    open_timesheet(page, "https://example.com", interactive=True)
+    assert prompts == [1]
+
+
+def test_open_timesheet_fails_fast_when_not_interactive(monkeypatch):
+    monkeypatch.setitem(core.SELECTORS["timeouts"], "presence_seconds", 0.05)
+    with pytest.raises(LoginRequiredError, match="not logged in"):
+        open_timesheet(PlantaPage(FakeDriver()), "https://example.com", interactive=False)
+
+
+def test_export_visible_week(tmp_path):
+    driver = two_day_driver()
+    driver.hours_elements.pop()  # make Tuesday have 2 rows like Monday
+    written = export_visible_week(PlantaPage(driver), tmp_path / "out" / "ref.csv")
+    assert written.read_text().splitlines() == [",Mo,Di", "1,0.00,1.00", "2,0.00,0.00"]
+
+
+def test_export_visible_week_errors():
+    with pytest.raises(ReferenceFileError, match="nothing to export"):
+        export_visible_week(PlantaPage(FakeDriver()), "x.csv")
+    with pytest.raises(ReferenceFileError, match="different numbers"):
+        export_visible_week(PlantaPage(two_day_driver()), "x.csv")
+
+
+def test_run_fills_multiple_weeks_and_waits(monkeypatch):
+    driver = two_day_driver()
+    options = RunOptions(url="https://example.com", week_specs=["0", "-1"], delay=0, close_delay=0)
+    total = run(driver, options)
+    assert driver.visited == ["https://example.com"]
+    assert driver.back_clicks == 1
+    assert total >= 4
+
+
+def test_run_export_requires_single_week(tmp_path):
+    options = RunOptions(url="u", week_specs=["0", "-1"], export_reference=str(tmp_path / "x.csv"))
+    with pytest.raises(ReferenceFileError, match="exactly one week"):
+        run(two_day_driver(), options)
+
+
+def test_run_export_writes_file(tmp_path):
+    driver = two_day_driver()
+    driver.hours_elements.pop()
+    out = tmp_path / "x.csv"
+    assert run(driver, RunOptions(url="u", export_reference=str(out))) == 0
+    assert out.exists()
+
+
+def test_wait_before_close_counts_down(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(core.time, "sleep", lambda s: sleeps.append(s))
+    core.wait_before_close(3)
+    core.wait_before_close(0)
+    assert sleeps == [1, 1, 1]

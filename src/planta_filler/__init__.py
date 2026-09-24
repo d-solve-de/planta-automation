@@ -1,20 +1,49 @@
-# =============================================================================
-# planta_filler - PLANTA Timesheet Automation
-# =============================================================================
-# This package automates filling timesheets in PLANTA by distributing working
-# hours across tasks using configurable strategies. It uses Selenium to control
-# Firefox and can run headlessly or with visible browser UI.
-#
-# Main entry point: python3 -m planta_filler
-# =============================================================================
+"""planta_filler - automatic timesheet filling for PLANTA Pulse.
 
-__version__ = "1.0.0"
-__author__ = "PLANTA Automation Team"
+The package drives Firefox through Selenium, reads the attendance hours of
+every day and distributes them over the task rows with a chosen strategy.
 
-from .core import start_driver, end_driver, set_week, reset_week
+Command line: ``planta-filler --url https://planta.example.com/`` or
+``python3 -m planta_filler ...``. See :mod:`planta_filler.cli`.
+
+Programmatic use::
+
+    from planta_filler import RunOptions, run, start_driver, end_driver
+
+    driver = start_driver(headless=False)
+    try:
+        run(driver, RunOptions(url="https://planta.example.com/", strategy="equal"))
+    finally:
+        end_driver(driver)
+"""
+
+__version__ = "0.2.0"
+__author__ = "Felix Paul"
+
+from .browser import PlantaPage, end_driver, start_driver
 from .calculations import fill_day
-from .strategies import strategies
-from .config import (
-    DEFAULT_URL, DEFAULT_STRATEGY, DEFAULT_WEEKDAYS,
-    DEFAULT_DELAY, DEFAULT_CLOSE_DELAY, VALID_STRATEGIES
+from .core import RunOptions, run
+from .exceptions import (
+    BrowserError,
+    LoginRequiredError,
+    PlantaFillerError,
+    ReferenceFileError,
+    ValidationError,
 )
+from .strategies import STRATEGIES
+
+__all__ = [
+    "STRATEGIES",
+    "BrowserError",
+    "LoginRequiredError",
+    "PlantaFillerError",
+    "PlantaPage",
+    "ReferenceFileError",
+    "RunOptions",
+    "ValidationError",
+    "__version__",
+    "end_driver",
+    "fill_day",
+    "run",
+    "start_driver",
+]

@@ -1,202 +1,142 @@
-# =============================================================================
-# reference_handler.py - Reference Week/Day File Management
-# =============================================================================
-# This module handles loading, saving, and auto-adapting reference files
-# for the copy_reference strategy. Reference files can contain a single day
-# or a whole week. A whole-week file has a header row with an index column
-# followed by one column per weekday.
-# =============================================================================
+"""Reading and writing reference CSV files for the ``copy_reference`` strategy.
+
+Whole-week format (recommended)::
+
+    ,Mo,Di,Mi,Do,Fr
+    1,6.00,4.00,3.00,2.00,0.00
+    2,1.00,1.00,2.00,2.00,0.00
+
+The first column is a row index and is ignored. Header labels may be German
+or English, abbreviated or full (``Mo``/``Mon``/``Monday``), any case. A file
+with a single value column is applied to every weekday.
+
+Values are *weights*: only their ratio matters, the day total always comes
+from PLANTA's attendance hours.
+"""
+
+from __future__ import annotations
 
 import csv
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
+
 from .config import DEFAULT_REFERENCE_FILE
+from .exceptions import ReferenceFileError
 
-# Supported weekday header names (German and English abbreviations and full names)
 WEEKDAY_HEADERS = {
-    0: ["Mo", "Mon", "Monday"],
-    1: ["Di", "Tue", "Tuesday"],
-    2: ["Mi", "Wed", "Wednesday"],
-    3: ["Do", "Thu", "Thursday"],
-    4: ["Fr", "Fri", "Friday"],
-    5: ["Sa", "Sat", "Saturday"],
-    6: ["So", "Sun", "Sunday"],
+    0: ("Mo", "Mon", "Monday", "Montag"),
+    1: ("Di", "Tue", "Tuesday", "Dienstag"),
+    2: ("Mi", "Wed", "Wednesday", "Mittwoch"),
+    3: ("Do", "Thu", "Thursday", "Donnerstag"),
+    4: ("Fr", "Fri", "Friday", "Freitag"),
+    5: ("Sa", "Sat", "Saturday", "Samstag"),
+    6: ("So", "Sun", "Sunday", "Sonntag"),
 }
-
-    
-def _read_csv(filepath: str) -> list[list[str]]:
-    path = Path(filepath)
-    if not path.exists():
-        return []
-    with open(path, 'r') as f:
-        reader = csv.reader(f)
-        return list(reader)
+DEFAULT_WEEK_LABELS = ("Mo", "Di", "Mi", "Do", "Fr")
 
 
-def load_reference_day(filepath: str = '', num_slots: int = 0) -> list:
-    """Load a single-day reference from a file with exactly one data column.
-    Falls back to default if file missing or lengths mismatch.
-    """
-    if filepath == '':
-        filepath = DEFAULT_REFERENCE_FILE
-    rows = _read_csv(filepath)
-    if len(rows) < 2:
-        return create_default_reference(num_slots) if num_slots else []
-    header = rows[0]
-    # Expect at least index + one value column
-    if len(header) < 2:
-        return create_default_reference(num_slots) if num_slots else []
-    values = []
-    for row in rows[1:]:
-        if len(row) >= 2:
-            try:
-                val = float(row[1].strip()) if row[1].strip() else 0.0
-            except ValueError:
-                val = 0.0
-            values.append(val)
-    if num_slots and len(values) != num_slots:
-        return create_default_reference(num_slots)
-    return values
+def _parse_float(cell: str) -> float:
+    cell = cell.strip().replace(",", ".")
+    if not cell:
+        return 0.0
+    try:
+        return float(cell)
+    except ValueError as exc:
+        raise ReferenceFileError(f"not a number: {cell!r}") from exc
 
 
-def load_reference_week(filepath: str) -> dict:
-    """Load a whole-week reference file.
-    Returns a dict mapping weekday header to list of values.
-    The first column is an index; subsequent columns are weekdays.
-    """
-    rows = _read_csv(filepath)
-    if len(rows) < 2:
-        return {}
-    header = rows[0]
-    if len(header) < 3:
-        # Not a week-format; treat as single-day with the given header
-        return {header[1] if len(header) > 1 else "Mo": load_reference_day(filepath, 0)}
-    # Build columns from header starting at col=1
-    result = {}
+@dataclass
+class ReferenceWeek:
+    """Parsed reference file: one list of weights per header label."""
+
+    columns: dict[str, list[float]] = field(default_factory=dict)
+    source: str = ""
+
+    @property
+    def labels(self) -> list[str]:
+        return list(self.columns)
+
+    @property
+    def num_rows(self) -> int:
+        return len(next(iter(self.columns.values()))) if self.columns else 0
+
+    def for_weekday(self, weekday_index: int, num_slots: int | None = None) -> list[float]:
+        """Weights for a weekday (0 = Monday), checked against ``num_slots``."""
+        column = self._column_for(weekday_index)
+        if column is None:
+            raise ReferenceFileError(f"{self.source}: no column for weekday {weekday_index} (labels: {self.labels})")
+        if num_slots is not None and len(column) != num_slots:
+            raise ReferenceFileError(
+                f"{self.source}: reference has {len(column)} rows but PLANTA shows {num_slots} task rows"
+            )
+        return list(column)
+
+    def _column_for(self, weekday_index: int) -> list[float] | None:
+        wanted = {label.lower() for label in WEEKDAY_HEADERS.get(weekday_index, ())}
+        for label, values in self.columns.items():
+            if label.lower() in wanted:
+                return values
+        if len(self.columns) == 1:  # single-day file applies to every weekday
+            return next(iter(self.columns.values()))
+        labels = self.labels
+        if len(labels) > 1 and weekday_index < len(labels):  # positional fallback
+            return self.columns[labels[weekday_index]]
+        return None
+
+
+def load_reference_week(filepath: str | Path) -> ReferenceWeek:
+    path = Path(filepath).expanduser()
+    if not path.is_file():
+        raise ReferenceFileError(f"reference file not found: {path}")
+    with path.open(newline="", encoding="utf-8") as handle:
+        rows = [row for row in csv.reader(handle) if any(cell.strip() for cell in row)]
+    if len(rows) < 2 or len(rows[0]) < 2:
+        raise ReferenceFileError(f"{path}: expected a header row and at least one data row with values")
+    header = [cell.strip() for cell in rows[0]]
+    columns: dict[str, list[float]] = {}
     for col_idx in range(1, len(header)):
-        day_name = header[col_idx].strip()
+        label = header[col_idx] or f"col{col_idx}"
         values = []
-        for row in rows[1:]:
-            if len(row) > col_idx:
-                try:
-                    val = float(row[col_idx].strip()) if row[col_idx].strip() else 0.0
-                except ValueError:
-                    val = 0.0
-                values.append(val)
-        result[day_name] = values
-    return result
-
-
-def load_reference_for_weekday(filepath: str, weekday_index: int, num_slots: int) -> list:
-    """Load the reference column for the given weekday from a week file.
-    Supports German/English headers and full names; case-insensitive.
-    If header label is not found but the file appears to be a week file (>=3 columns),
-    select the column by position (weekday_index + 1). If a valid reference cannot be
-    derived (missing file, malformed, or dimension mismatch), raise ValueError so the
-    caller can explicitly fall back and report it.
-    """
-    rows = _read_csv(filepath)
-    if not rows:
-        raise ValueError(f"Reference file missing or unreadable: {filepath}")
-    header = rows[0]
-    # Normalize header labels
-    norm_header = [h.strip().lower() for h in header]
-    labels = {lbl.lower() for lbl in WEEKDAY_HEADERS.get(weekday_index, [])}
-    col_idx = None
-    for i in range(1, len(norm_header)):
-        if norm_header[i] in labels:
-            col_idx = i
-            break
-    # If not found by label, try positional selection for week-style files
-    if col_idx is None and len(header) >= 3:
-        pos_idx = 1 + weekday_index
-        if pos_idx < len(header):
-            col_idx = pos_idx
-    if col_idx is None:
-        # Fall back to single-day style (second column); if that fails dimensionally, raise
-        values = load_reference_day(filepath, num_slots)
-        if num_slots and len(values) != num_slots:
-            raise ValueError(f"Reference file malformed or wrong dimensions: {filepath}")
-        return values
-    values = []
-    for row in rows[1:]:
-        if len(row) > col_idx:
+        for row_number, row in enumerate(rows[1:], start=2):
+            if col_idx >= len(row):
+                raise ReferenceFileError(f"{path}: line {row_number} has too few columns")
             try:
-                val = float(row[col_idx].strip()) if row[col_idx].strip() else 0.0
-            except ValueError:
-                val = 0.0
-            values.append(val)
-    if num_slots and len(values) != num_slots:
-        raise ValueError(f"Reference dimension mismatch: expected {num_slots}, got {len(values)} in {filepath}")
-    return values
+                values.append(_parse_float(row[col_idx]))
+            except ReferenceFileError as exc:
+                raise ReferenceFileError(f"{path}: line {row_number}: {exc}") from exc
+        columns[label] = values
+    return ReferenceWeek(columns=columns, source=str(path))
 
 
-def create_default_reference(num_slots: int) -> list:
-    if num_slots <= 0:
-        return []
-    return [1.0] * num_slots
+def load_reference_for_weekday(filepath: str | Path | None, weekday_index: int, num_slots: int) -> list[float]:
+    """Convenience wrapper: load the file and pick the weekday column."""
+    return load_reference_week(filepath or DEFAULT_REFERENCE_FILE).for_weekday(weekday_index, num_slots)
 
 
-def save_reference_day(filepath: str, values: list, weekday_name: str = "Mo") -> None:
-    path = Path(filepath)
-    rows = [["", weekday_name]]
-    for i, val in enumerate(values, 1):
-        rows.append([str(i), f"{val:.2f}"])
-    with open(path, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerows(rows)
+def create_default_reference(num_slots: int) -> list[float]:
+    """Equal weights, the fallback when no usable reference exists."""
+    return [1.0] * max(0, num_slots)
 
 
-def ensure_reference_file(filepath: str, num_slots: int) -> str:
-    """Ensure a reference file exists and has the expected slot count.
-    For week files, we check the first weekday column's length.
+def save_reference_week(filepath: str | Path, columns: dict[str, Sequence[float]]) -> Path:
+    """Write a whole-week reference file; returns the written path."""
+    path = Path(filepath).expanduser()
+    labels = list(columns)
+    if not labels:
+        raise ValueError("at least one column is required")
+    num_rows = len(columns[labels[0]])
+    if any(len(columns[label]) != num_rows for label in labels):
+        raise ValueError("all columns must have the same number of rows")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["", *labels])
+        for row_idx in range(num_rows):
+            writer.writerow([str(row_idx + 1), *(f"{columns[label][row_idx]:.2f}" for label in labels)])
+    return path
 
-    If we need to create a new default file due to missing or wrong dimensions and
-    the given path is not already inside the package data dir, we will write the
-    new file into the package data directory (next to the default file) and return
-    that path instead, leaving the original path untouched.
-    """
-    path = Path(filepath)
-    data_dir = Path(__file__).parent / 'data'
-    data_dir.mkdir(exist_ok=True)
-    default_path = Path(DEFAULT_REFERENCE_FILE).resolve()
 
-    if not path.exists():
-        default_values = create_default_reference(num_slots)
-        # Only redirect to data dir for the default packaged file
-        if path.resolve() == default_path:
-            target_path = default_path
-        else:
-            target_path = path
-        save_reference_day(str(target_path), default_values)
-        return str(target_path)
-    rows = _read_csv(filepath)
-    if not rows or len(rows) < 2:
-        default_values = create_default_reference(num_slots)
-        target_path = default_path if path.resolve() == default_path else path
-        save_reference_day(str(target_path), default_values)
-        return str(target_path)
-    header = rows[0]
-    # Determine a sample column to validate length: prefer second column
-    sample_col = 1 if len(header) > 1 else None
-    if sample_col is None:
-        default_values = create_default_reference(num_slots)
-        target_path = default_path if path.resolve() == default_path else path
-        save_reference_day(str(target_path), default_values)
-        return str(target_path)
-    current_values = []
-    for row in rows[1:]:
-        if len(row) > sample_col:
-            try:
-                val = float(row[sample_col].strip()) if row[sample_col].strip() else 0.0
-            except ValueError:
-                val = 0.0
-            current_values.append(val)
-    if len(current_values) != num_slots:
-        backup_path = path.with_suffix('.csv.bak')
-        if path.exists():
-            path.rename(backup_path)
-        default_values = create_default_reference(num_slots)
-        target_path = default_path if path.resolve() == default_path else path
-        save_reference_day(str(target_path), default_values)
-        return str(target_path)
-    return str(path)
+def write_reference_template(filepath: str | Path, num_slots: int, labels: Sequence[str] = DEFAULT_WEEK_LABELS) -> Path:
+    """Create a whole-week file with equal weights, ready to be edited."""
+    return save_reference_week(filepath, {label: create_default_reference(num_slots) for label in labels})

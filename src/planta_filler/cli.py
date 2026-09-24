@@ -1,279 +1,254 @@
-# =============================================================================
-# cli.py - Command Line Interface
-# =============================================================================
-# This module provides the command-line interface for the PLANTA Filler.
-# It handles argument parsing, input validation, and orchestrates the
-# automation workflow.
-#
-# Entry points:
-# - main(): Main CLI entry point (python3 -m planta_filler)
-# - print_man_page(): Display full manual page
-#
-# Usage: python3 -m planta_filler [OPTIONS]
-# =============================================================================
+"""Command-line interface: parse arguments, validate them, run the workflow.
+
+Usage::
+
+    planta-filler --url https://planta.example.com/ [OPTIONS]
+    python3 -m planta_filler --url ... [OPTIONS]
+"""
+
+from __future__ import annotations
 
 import argparse
+import logging
 import sys
-from pathlib import Path
 
-from .core import start_driver, end_driver, set_week, reset_week
+from . import __version__
+from .browser import end_driver, start_driver
 from .config import (
-    DEFAULT_URL, DEFAULT_STRATEGY, DEFAULT_WEEKDAYS, DEFAULT_DELAY,
-    DEFAULT_CLOSE_DELAY, DEFAULT_USE_PERSISTENT_PROFILE, DEFAULT_HEADLESS,
-    VALID_STRATEGIES, DEFAULT_POST_RANDOMIZATION
+    DEFAULT_CLOSE_DELAY,
+    DEFAULT_DELAY,
+    DEFAULT_HEADLESS,
+    DEFAULT_POST_RANDOMIZATION,
+    DEFAULT_STRATEGY,
+    DEFAULT_URL,
+    DEFAULT_USE_PERSISTENT_PROFILE,
+    DEFAULT_WEEK,
+    DEFAULT_WEEKDAYS,
+    MAN_PAGE_FILE,
+    PROFILE_DIR,
+    VALID_STRATEGIES,
+    WEEKDAY_NAMES,
 )
-from .validation import validate_all_inputs, ValidationError
-from .week_handler import parse_week_spec, format_week_display
+from .core import RunOptions, run
+from .exceptions import PlantaFillerError, ValidationError
+from .validation import parse_int_list, validate_all_inputs
+from .week_handler import format_week_display, parse_week_spec
+
+log = logging.getLogger("planta_filler")
+
+EPILOG = f"""
+examples:
+  planta-filler --url https://planta.example.com/
+  planta-filler --url URL --strategy random --weekdays 0,2,4
+  planta-filler --url URL --week=-1,0 --strategy copy_reference --reference-file ~/my_week.csv
+  planta-filler --url URL --reset --week=-1
+  planta-filler --url URL --export-reference ~/my_week.csv
+  planta-filler --man
+
+weekday codes: 0=Mon 1=Tue 2=Wed 3=Thu 4=Fri 5=Sat 6=Sun
+persistent Firefox profile: {PROFILE_DIR}
+"""
 
 
-def print_man_page():
-    man_page_path = Path(__file__).parent / 'data' / 'man_page.txt'
-    with open(man_page_path, 'r') as f:
-        man_page_template = f.read()
-    
-    man_page = man_page_template.format(
-        default_url=DEFAULT_URL,
+def render_man_page() -> str:
+    template = MAN_PAGE_FILE.read_text(encoding="utf-8")
+    return template.format(
+        version=__version__,
+        default_url=DEFAULT_URL or "(none, --url is required)",
         default_strategy=DEFAULT_STRATEGY,
-        default_weekdays=','.join(map(str, DEFAULT_WEEKDAYS)),
+        default_weekdays=",".join(map(str, DEFAULT_WEEKDAYS)),
+        default_week=DEFAULT_WEEK,
         default_delay=DEFAULT_DELAY,
         default_close_delay=DEFAULT_CLOSE_DELAY,
         default_persistent=str(DEFAULT_USE_PERSISTENT_PROFILE),
-        default_headless=str(DEFAULT_HEADLESS)
+        default_headless=str(DEFAULT_HEADLESS),
+        default_post_randomization=DEFAULT_POST_RANDOMIZATION,
+        profile_dir=PROFILE_DIR,
     )
-    
-    print(man_page)
-    sys.exit(0)
 
 
-def main():
-    if '--man' in sys.argv:
-        print_man_page()
-    
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description='PLANTA Timesheet Automation - Automatic timesheet filling',
+        prog="planta-filler",
+        description="Fill PLANTA timesheets automatically by distributing attendance hours across task rows.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=f"""
-Examples:
-  # Use defaults (fill Mon-Fri with equal strategy)
-  python3 -m planta_filler
+        epilog=EPILOG,
+    )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    parser.add_argument("--man", action="store_true", help="show the full manual page and exit")
 
-  # Fill with random distribution
-  python3 -m planta_filler --strategy random
-
-  # Fill only Mon, Wed, Fri
-  python3 -m planta_filler --weekdays 0,2,4
-  
-  # Reset to zero
-  python3 -m planta_filler --reset
-  
-  # Use persistent profile (saves login)
-  python3 -m planta_filler --persistent
-
-  # Fill last week
-  python3 -m planta_filler --week -1
-
-  # Show full manual
-  python3 -m planta_filler --man
-
-Current defaults:
-  URL:         {DEFAULT_URL}
-  Strategy:    {DEFAULT_STRATEGY}
-  Weekdays:    {','.join(map(str, DEFAULT_WEEKDAYS))} (Mon-Fri)
-  Delay:       {DEFAULT_DELAY}s
-  Close delay: {DEFAULT_CLOSE_DELAY}s
-
-Weekday codes: 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun
-        """
+    target = parser.add_argument_group("what to fill")
+    target.add_argument("--url", default=DEFAULT_URL, help="PLANTA URL (required unless a default is configured)")
+    target.add_argument(
+        "--week",
+        default=DEFAULT_WEEK,
+        help="week(s) to process: offset like 0, -1, 2 or ISO week like 2024-W05; "
+        "several as one comma-separated argument, e.g. --week=-2,-1,0 (default: %(default)s)",
     )
-    
-    parser.add_argument(
-        '--url',
-        type=str,
-        default=DEFAULT_URL,
-        help=f'PLANTA URL (default: {DEFAULT_URL})'
+    target.add_argument(
+        "--weekdays",
+        default=",".join(map(str, DEFAULT_WEEKDAYS)),
+        help="comma-separated weekdays to process, 0=Mon .. 6=Sun (default: %(default)s)",
     )
-    
-    parser.add_argument(
-        '--strategy',
-        type=str,
-        choices=VALID_STRATEGIES,
-        default=DEFAULT_STRATEGY,
-        help=f'Distribution strategy (default: {DEFAULT_STRATEGY})'
-    )
-    
-    parser.add_argument(
-        '--weekdays',
-        type=str,
-        default=','.join(map(str, DEFAULT_WEEKDAYS)),
-        help=f"Comma-separated weekdays (default: {','.join(map(str, DEFAULT_WEEKDAYS))} = Mon-Fri)"
-    )
-    
-    parser.add_argument(
-        '--reset',
-        action='store_true',
-        help='Reset hours to 0 instead of filling'
-    )
-    
-    parser.add_argument(
-        '--persistent',
-        action='store_true',
-        default=DEFAULT_USE_PERSISTENT_PROFILE,
-        help=f'Use persistent Firefox profile (default: {DEFAULT_USE_PERSISTENT_PROFILE})'
-    )
-    
-    parser.add_argument(
-        '--headless',
-        action='store_true',
-        default=DEFAULT_HEADLESS,
-        help=f'Run in headless mode (default: {DEFAULT_HEADLESS})'
-    )
-    
-    parser.add_argument(
-        '--delay',
-        type=float,
-        default=DEFAULT_DELAY,
-        help=f'Delay between field updates in seconds (default: {DEFAULT_DELAY})'
-    )
-    
-    parser.add_argument(
-        '--close-delay',
-        type=float,
-        default=DEFAULT_CLOSE_DELAY,
-        help=f'Delay before closing browser in seconds (default: {DEFAULT_CLOSE_DELAY})'
+    target.add_argument(
+        "--exclude",
+        default="",
+        metavar="INDICES",
+        help="comma-separated zero-based task row indices that are never changed",
     )
 
-    parser.add_argument(
-        '--post-randomization',
+    how = parser.add_argument_group("how to fill")
+    how.add_argument("--strategy", choices=VALID_STRATEGIES, default=DEFAULT_STRATEGY, help="(default: %(default)s)")
+    how.add_argument(
+        "--reference-file",
+        metavar="PATH",
+        help="CSV with weights for copy_reference (default: the packaged example file)",
+    )
+    how.add_argument(
+        "--post-randomization",
         type=float,
         default=DEFAULT_POST_RANDOMIZATION,
-        help='Post-randomization factor (0.0-<1.0) applied to fill values for natural variation'
+        metavar="FACTOR",
+        help="jitter every value by up to FACTOR of itself, 0.0 <= FACTOR < 1.0 (default: %(default)s)",
+    )
+    how.add_argument("--reset", action="store_true", help="set the selected cells to 0 instead of filling them")
+    how.add_argument(
+        "--export-reference",
+        metavar="PATH",
+        help="write the values currently in PLANTA for the selected week to PATH as a reference CSV and exit",
     )
 
-    parser.add_argument(
-        '--reference-file',
-        type=str,
-        default=None,
-        help='Full path to reference CSV (single-day or whole-week). If omitted, uses the default packaged file.'
+    browser = parser.add_argument_group("browser")
+    browser.add_argument(
+        "--persistent",
+        action=argparse.BooleanOptionalAction,
+        default=DEFAULT_USE_PERSISTENT_PROFILE,
+        help=f"keep the login in a Firefox profile under {PROFILE_DIR}",
+    )
+    browser.add_argument(
+        "--headless", action="store_true", default=DEFAULT_HEADLESS, help="run Firefox without a window"
+    )
+    browser.add_argument(
+        "--delay", type=float, default=DEFAULT_DELAY, help="seconds between field updates (default: %(default)s)"
+    )
+    browser.add_argument(
+        "--close-delay",
+        type=float,
+        default=DEFAULT_CLOSE_DELAY,
+        help="seconds to keep the browser open at the end (default: %(default)s)",
     )
 
-    parser.add_argument(
-        '--exclude',
-        type=str,
-        default=None,
-        help='Comma-separated zero-based row indices to exclude from filling (applies to all processed days)'
-    )
-    
-    parser.add_argument(
-        '--man',
-        action='store_true',
-        help='Show detailed manual page'
-    )
-    
-    parser.add_argument(
-        '--week',
-        type=str,
-        default='0',
-        help='Week(s) to process: YYYY-WNN or offset (e.g., -1,0 for last and current)'
-    )
-    
-    args = parser.parse_args()
-    
-    if args.weekdays:
-        weekdays = [int(d.strip()) for d in args.weekdays.split(',')]
-    else:
-        weekdays = DEFAULT_WEEKDAYS
-    
+    output = parser.add_argument_group("output")
+    output.add_argument("-v", "--verbose", action="store_true", help="show debug output")
+    output.add_argument("-q", "--quiet", action="store_true", help="only show warnings and errors")
+    return parser
+
+
+def configure_logging(verbose: bool = False, quiet: bool = False) -> None:
+    level = logging.DEBUG if verbose else logging.WARNING if quiet else logging.INFO
+    logging.basicConfig(level=level, format="%(message)s", stream=sys.stdout, force=True)
+    if not verbose:  # selenium is chatty at DEBUG
+        logging.getLogger("selenium").setLevel(logging.WARNING)
+
+
+def options_from_args(args: argparse.Namespace) -> RunOptions:
+    """Validate the parsed arguments and turn them into :class:`RunOptions`."""
     try:
-        validate_all_inputs(
-            strategy=args.strategy,
-            weekdays=weekdays,
-            delay=args.delay,
-            close_delay=args.close_delay,
-            url=args.url
-        )
-    except ValidationError as e:
-        print(f"\n❌ Validation Error:\n{e}")
-        sys.exit(1)
-    
-    # Prepare multiple week specs (comma separated allowed, preserve order)
-    week_specs = [w.strip() for w in args.week.split(',') if w.strip()]
-    
+        weekdays = parse_int_list(args.weekdays, "--weekdays")
+        exclude_indices = parse_int_list(args.exclude, "--exclude")
+    except ValidationError as exc:
+        raise ValidationError(f"Validation failed:\n  - {exc}") from exc
+
+    validated = validate_all_inputs(
+        url=args.url,
+        strategy=args.strategy,
+        weekdays=weekdays,
+        delay=args.delay,
+        close_delay=args.close_delay,
+        week=args.week,
+        post_randomization=args.post_randomization,
+        exclude_indices=exclude_indices,
+        reference_file=args.reference_file,
+    )
+    interactive = not args.headless and sys.stdin.isatty()
+    return RunOptions(
+        url=validated["url"],
+        week_specs=validated["week_specs"],
+        weekdays=validated["weekdays"],
+        strategy=validated["strategy"],
+        post_randomization=validated["post_randomization"],
+        reference_file=validated["reference_file"],
+        exclude_indices=validated["exclude_indices"],
+        delay=validated["delay"],
+        close_delay=validated["close_delay"],
+        reset=args.reset,
+        export_reference=args.export_reference,
+        interactive=interactive,
+    )
+
+
+def print_summary(options: RunOptions, headless: bool, persistent: bool) -> None:
+    weeks = ", ".join(format_week_display(*parse_week_spec(spec)) for spec in options.week_specs)
+    action = "EXPORT" if options.export_reference else "RESET" if options.reset else "FILL"
+    lines = [
+        "=" * 70,
+        "PLANTA TIMESHEET AUTOMATION",
+        "=" * 70,
+        f"URL:          {options.url}",
+        f"Week(s):      {weeks}",
+        f"Weekdays:     {', '.join(WEEKDAY_NAMES[d] for d in options.weekdays or [])}",
+        f"Action:       {action}",
+    ]
+    if action == "FILL":
+        lines.append(f"Strategy:     {options.strategy}")
+        if options.strategy == "copy_reference":
+            lines.append(f"Reference:    {options.reference_file or 'packaged default'}")
+        lines.append(f"Post-random.: {options.post_randomization}")
+    if action == "EXPORT":
+        lines.append(f"Export to:    {options.export_reference}")
+    if options.exclude_indices:
+        lines.append(f"Excluded:     rows {options.exclude_indices}")
+    lines += [
+        f"Browser:      {'headless' if headless else 'visible'}, {'persistent' if persistent else 'temporary'} profile",
+        f"Delays:       {options.delay}s between fields, {options.close_delay}s before closing",
+        "=" * 70,
+    ]
+    log.info("\n".join(lines))
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.man:
+        print(render_man_page())
+        return 0
+
+    configure_logging(verbose=args.verbose, quiet=args.quiet)
     try:
-        # Validate that all week specs are parseable (in order)
-        for w in week_specs:
-            parse_week_spec(w)
-    except ValueError as e:
-        print(f"\n❌ Invalid week specification: {e}")
-        sys.exit(1)
-    
-    # Display summary (use first week for header if multiple)
-    y0, w0 = parse_week_spec(week_specs[0])
-    week_display = format_week_display(y0, w0)
-    
-    print("="*70)
-    print("PLANTA TIMESHEET AUTOMATION")
-    print("="*70)
-    print(f"URL:         {args.url}")
-    print(f"Week:        {week_display}" + (" (and others)" if len(week_specs) > 1 else ""))
-    print(f"Action:      {'RESET' if args.reset else 'FILL'}")
-    if not args.reset:
-        print(f"Strategy:    {args.strategy.upper()}")
-        print(f"Post-randomization: {args.post_randomization}")
-        if args.strategy == 'copy_reference':
-            print(f"Reference file: {args.reference_file or 'DEFAULT'}")
-    if weekdays:
-        weekday_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-        selected = ', '.join(weekday_names[d] for d in weekdays)
-        print(f"Weekdays:    {selected}")
-    print(f"Delay:       {args.delay}s")
-    print(f"Close delay: {args.close_delay}s")
-    if args.exclude:
-        print(f"Excludes:    {args.exclude}")
-    if args.strategy == 'copy_reference':
-        print(f"Reference:   {args.reference_file or 'DEFAULT'}")
-    print("="*70 + "\n")
-    
-    driver = start_driver(headless=args.headless, use_persistent_profile=args.persistent)
-    
-    # Parse exclude indices
-    exclude_indices = None
-    if args.exclude:
-        try:
-            exclude_indices = [int(x.strip()) for x in args.exclude.split(',') if x.strip() != '']
-        except ValueError:
-            print("\n❌ Invalid exclude specification: must be comma-separated integers (0-based row indices)")
-            sys.exit(1)
-    
+        options = options_from_args(args)
+    except ValidationError as exc:
+        log.error("\n❌ %s", exc)
+        return 2
+
+    print_summary(options, headless=args.headless, persistent=args.persistent)
+
     try:
-        if args.reset:
-            reset_week(
-                driver,
-                args.url,
-                weekdays,
-                args.delay,
-                args.close_delay,
-                skip_login_prompt=args.persistent,
-                week_specs=week_specs,
-                exclude_indices=exclude_indices,
-            )
-        else:
-            set_week(
-                driver,
-                url=args.url,
-                strategy=args.strategy,
-                weekdays=weekdays,
-                skip_login_prompt=args.persistent,
-                delay=args.delay,
-                close_delay=args.close_delay,
-                post_randomization=args.post_randomization,
-                week_specs=week_specs,
-                reference_day=None,
-                reference_file=args.reference_file,
-                exclude_indices=exclude_indices,
-            )
+        driver = start_driver(headless=args.headless, use_persistent_profile=args.persistent)
+    except PlantaFillerError as exc:
+        log.error("\n❌ %s", exc)
+        return 1
+    try:
+        run(driver, options)
+    except PlantaFillerError as exc:
+        log.error("\n❌ %s", exc)
+        return 1
+    except KeyboardInterrupt:
+        log.warning("\nInterrupted, closing the browser.")
+        return 130
     finally:
         end_driver(driver)
+    return 0
 
 
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":  # pragma: no cover
+    sys.exit(main())
