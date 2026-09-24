@@ -114,7 +114,13 @@ class PlantaPage:
         key = "week_forward" if delta > 0 else "week_back"
         selector = self.selectors["navigation"][key]
         for _ in range(abs(delta)):
-            self.driver.find_element(By.CSS_SELECTOR, selector).click()
+            arrow = self.driver.find_element(By.CSS_SELECTOR, selector)
+            try:
+                arrow.click()
+            except WebDriverException:
+                # The icon can be covered by an overlay; a JavaScript click still reaches it.
+                log.debug("Native click on %s failed, using JavaScript click", selector, exc_info=True)
+                self.driver.execute_script("arguments[0].click();", arrow)
 
     # --- reading --------------------------------------------------------------
 

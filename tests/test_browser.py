@@ -1,6 +1,7 @@
 import pytest
 
 from planta_filler.browser import PlantaPage, end_driver
+from planta_filler.config import SELECTORS
 from planta_filler.exceptions import BrowserError
 from tests.conftest import FakeDriver, hours_element, target_element
 
@@ -73,3 +74,19 @@ def test_end_driver_swallows_errors():
             raise RuntimeError("boom")
 
     end_driver(Broken())
+
+
+def test_go_weeks_falls_back_to_javascript_click():
+    from selenium.common.exceptions import ElementClickInterceptedException
+
+    driver = FakeDriver()
+    scripts = []
+
+    class Covered:
+        def click(self):
+            raise ElementClickInterceptedException("overlay")
+
+    driver.nav[SELECTORS["navigation"]["week_back"]] = Covered()
+    driver.execute_script = lambda script, element: scripts.append((script, element))
+    PlantaPage(driver).go_weeks(-1)
+    assert len(scripts) == 1 and "click()" in scripts[0][0]
