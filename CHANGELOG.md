@@ -37,6 +37,9 @@ All notable changes to this project are documented here. The format follows
   old code rewrote the file inside the installed package). The affected days fall
   back to equal weights and a warning is printed.
 - Rounding residuals are pushed onto the largest value instead of a random one.
+- Week navigation is verified: after clicking the week arrows the tool waits for
+  an input of the target week and refuses to write when PLANTA still shows a
+  different week (previously a slow page could fill the wrong week).
 - Internal structure: Selenium access lives in `browser.py` (`PlantaPage`), the
   workflow in `core.py` (`run`, `RunOptions`), and errors derive from
   `PlantaFillerError`. `set_week`/`reset_week` were replaced by `run`.

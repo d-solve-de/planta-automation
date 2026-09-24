@@ -69,6 +69,14 @@ The message lists every problem. Typical causes:
 
 The affected days are filled with equal weights; nothing else is changed.
 
+## "PLANTA shows ... but week ... was requested; week navigation did not work"
+
+The week arrows were clicked but the page still showed another week when the tool
+was about to write, so it stopped without changing that week. Usually the page was
+slow: run again, or raise `SELECTORS["timeouts"]["navigation_seconds"]` in
+`config.py`. If it happens every time, the arrow selectors in `config.py` no longer
+match PLANTA's markup ([development.md](development.md#when-plantas-ui-changes)).
+
 ## Some days are skipped
 
 Days with 0 attendance hours (weekends, holidays, sick leave) are skipped on purpose.

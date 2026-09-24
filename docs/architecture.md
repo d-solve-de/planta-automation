@@ -38,7 +38,7 @@ core.run(driver, options)
  ├─ PlantaPage(driver)
  ├─ open_timesheet(): get URL, check title, wait for inputs, prompt for login if interactive
  ├─ load_reference(): read the CSV once (copy_reference only)
- └─ for spec in iter_weeks(): click the week arrows to reach the spec
+ └─ for week in iter_weeks(): click the week arrows, wait until the week's dates are visible
       ├─ fill_visible_week():  page.read_hours() + page.read_target_hours()
       │      for each working day: calculations.fill_day() → page.write_hours() per changed cell
       ├─ reset_visible_week(): same, but every non-excluded cell becomes 0
@@ -65,7 +65,10 @@ against `tests/conftest.py::FakeDriver`; no browser is started.
 **Week specs.** `"0"`, `"-1"`, `"2026-W05"`. `week_handler.week_offset_from_today()`
 turns a spec into a number of weeks relative to the current week; `core.iter_weeks()`
 clicks the difference between the current and the target offset, so weeks can be
-listed in any order.
+listed in any order. After clicking it waits until an input of the target week is
+present and yields a `VisibleWeek` (spec plus its seven dates). Every operation
+restricts itself to those dates and raises `BrowserError` if PLANTA shows a
+different week, so a slow page can never lead to writes into the wrong week.
 
 **Hour fields.** `PlantaPage.read_hours()` returns `{date: [HourField(field_id, value), ...]}`
 in DOM order. The date is taken from the input id, which ends with `YYYY-MM-DD`.

@@ -63,6 +63,8 @@ SELECTORS = {
         "presence_seconds": 10,
         # Seconds to wait for the inputs after the user confirmed a manual login.
         "after_login_seconds": 60,
+        # Seconds to wait for the inputs of the target week after clicking a week arrow.
+        "navigation_seconds": 10,
     },
     "navigation": {
         # These arrows move the visible timesheet by one whole week.

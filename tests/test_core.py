@@ -4,8 +4,10 @@ import pytest
 
 from planta_filler import core
 from planta_filler.browser import PlantaPage
+from planta_filler.config import SELECTORS
 from planta_filler.core import (
     RunOptions,
+    VisibleWeek,
     export_visible_week,
     fill_visible_week,
     iter_weeks,
@@ -13,7 +15,7 @@ from planta_filler.core import (
     reset_visible_week,
     run,
 )
-from planta_filler.exceptions import LoginRequiredError, ReferenceFileError
+from planta_filler.exceptions import BrowserError, LoginRequiredError, ReferenceFileError
 from planta_filler.reference_handler import load_reference_week
 from tests.conftest import FakeDriver, hours_element, target_element
 
@@ -25,15 +27,12 @@ def no_sleep(monkeypatch):
     monkeypatch.setattr(core.time, "sleep", lambda s: None)
 
 
+TODAY = datetime(2024, 1, 3)  # Wednesday of ISO week 1/2024, which contains MON and TUE
+
+
 @pytest.fixture(autouse=True)
-def fixed_today(monkeypatch):
-    monkeypatch.setattr(core, "week_offset_from_today", lambda spec: core_week_offset(spec))
-
-
-def core_week_offset(spec):
-    from planta_filler.week_handler import week_offset_from_today
-
-    return week_offset_from_today(spec, datetime(2024, 1, 3))
+def fast_navigation(monkeypatch):
+    monkeypatch.setitem(core.SELECTORS["timeouts"], "navigation_seconds", 0.05)
 
 
 def two_day_driver():
@@ -117,12 +116,44 @@ def test_reset_visible_week_zeroes_non_excluded_cells():
     assert [e.value for e in driver.hours_elements] == ["0.0", "0.75", "0.0"]
 
 
-def test_iter_weeks_navigates_relative_to_current_week():
+def test_iter_weeks_navigates_relative_to_current_week(caplog):
     driver = FakeDriver()
     page = PlantaPage(driver)
-    assert list(iter_weeks(page, ["0", "-2", "1"])) == ["0", "-2", "1"]
+    weeks = list(iter_weeks(page, ["0", "-2", "1"], TODAY))
+    assert [w.spec for w in weeks] == ["0", "-2", "1"]
+    assert weeks[0].dates == tuple(f"2024-01-0{d}" for d in range(1, 8))
+    assert (weeks[1].year, weeks[1].week) == (2023, 51)
     assert driver.back_clicks == 2
     assert driver.forward_clicks == 3
+    assert caplog.text.count("Could not confirm") == 3  # the empty fake page never shows the week
+
+
+def test_iter_weeks_waits_for_the_target_week(caplog):
+    driver = two_day_driver()
+    weeks = list(iter_weeks(PlantaPage(driver), ["0"], TODAY))
+    assert weeks[0].label.startswith("0 (week 1/2024, 2024-01-01 to 2024-01-07)")
+    assert "Could not confirm" not in caplog.text
+
+
+def test_operations_refuse_a_wrong_week():
+    driver = two_day_driver()
+    other = VisibleWeek("-1", 2023, 52, tuple(f"2023-12-{d}" for d in range(25, 32)))
+    with pytest.raises(BrowserError, match="navigation did not work"):
+        fill_visible_week(PlantaPage(driver), RunOptions(url="u", delay=0), week=other)
+    with pytest.raises(BrowserError):
+        reset_visible_week(PlantaPage(driver), RunOptions(url="u", delay=0), week=other)
+    with pytest.raises(BrowserError):
+        export_visible_week(PlantaPage(driver), "x.csv", week=other)
+    assert all(e.send_keys_calls == 0 for e in driver.hours_elements)
+
+
+def test_operations_restrict_to_the_requested_week():
+    driver = two_day_driver()
+    driver.hours_elements.append(hours_element("2024-01-08", "z", "0"))  # next Monday, leaked into the DOM
+    driver.target_elements.append(target_element("2024-01-08", "8"))
+    week = VisibleWeek("0", 2024, 1, tuple(f"2024-01-0{d}" for d in range(1, 8)))
+    fill_visible_week(PlantaPage(driver), RunOptions(url="u", delay=0), week=week)
+    assert driver.hours_elements[-1].value == "0"
 
 
 def test_open_timesheet_prompts_for_login_when_interactive(monkeypatch):
@@ -162,26 +193,78 @@ def test_export_visible_week_errors():
         export_visible_week(PlantaPage(two_day_driver()), "x.csv")
 
 
-def test_run_fills_multiple_weeks_and_waits(monkeypatch):
-    driver = two_day_driver()
-    options = RunOptions(url="https://example.com", week_specs=["0", "-1"], delay=0, close_delay=0)
-    total = run(driver, options)
+class NavigatingFakeDriver(FakeDriver):
+    """A fake page whose dates move by seven days whenever a week arrow is clicked."""
+
+    def __init__(self):
+        super().__init__(
+            hours_elements=[hours_element(MON, "a", "0.0"), hours_element(TUE, "b", "0.0")],
+            target_elements=[target_element(MON, "4"), target_element(TUE, "3")],
+        )
+        self.filled = {}
+
+    def find_element(self, by, selector):
+        if selector in self.nav:
+            delta = -7 if selector == SELECTORS["navigation"]["week_back"] else 7
+            driver = self
+
+            class Arrow:
+                def click(self):
+                    driver.nav[selector].clicks += 1
+                    driver._shift(delta)
+
+            return Arrow()
+        return super().find_element(by, selector)
+
+    def _shift(self, days):
+        from datetime import datetime, timedelta
+
+        def moved(date):
+            return (datetime.strptime(date, "%Y-%m-%d") + timedelta(days=days)).strftime("%Y-%m-%d")
+
+        for e in self.hours_elements:
+            self.filled.setdefault(e.element_id, e.value)  # first value seen wins
+        self.hours_elements = [
+            hours_element(moved(e.element_id[-10:]), e.element_id.split("-")[2], "0.0") for e in self.hours_elements
+        ]
+        self.target_elements = [
+            target_element(moved(t.class_attr[-8:][:4] + "-" + t.class_attr[-4:-2] + "-" + t.class_attr[-2:]), t.text)
+            for t in self.target_elements
+        ]
+        self.by_id = {e.element_id: e for e in self.hours_elements}
+
+
+def test_run_fills_multiple_weeks_and_navigates():
+    driver = NavigatingFakeDriver()
+    options = RunOptions(url="https://example.com", week_specs=["0", "-1", "1"], delay=0, close_delay=0)
+    total = run(driver, options, TODAY)
     assert driver.visited == ["https://example.com"]
-    assert driver.back_clicks == 1
-    assert total >= 4
+    assert driver.back_clicks == 1 and driver.forward_clicks == 2
+    assert total == 6  # two cells per week, three weeks
+    assert driver.filled["load-field-a-2024-01-01"] == "4.0"  # current week, then last week
+    assert driver.filled["load-field-a-2023-12-25"] == "4.0"
+    assert [e.value for e in driver.hours_elements] == ["4.0", "3.0"]  # next week, still on screen
+
+
+def test_run_refuses_to_write_when_navigation_fails():
+    driver = two_day_driver()  # never changes its dates, so week -1 can never become visible
+    options = RunOptions(url="https://example.com", week_specs=["0", "-1"], delay=0, close_delay=0)
+    with pytest.raises(BrowserError, match="navigation did not work"):
+        run(driver, options, TODAY)
+    assert [e.value for e in driver.hours_elements[:2]] == ["2.0", "2.0"]  # week 0 was filled first
 
 
 def test_run_export_requires_single_week(tmp_path):
     options = RunOptions(url="u", week_specs=["0", "-1"], export_reference=str(tmp_path / "x.csv"))
     with pytest.raises(ReferenceFileError, match="exactly one week"):
-        run(two_day_driver(), options)
+        run(two_day_driver(), options, TODAY)
 
 
 def test_run_export_writes_file(tmp_path):
     driver = two_day_driver()
     driver.hours_elements.pop()
     out = tmp_path / "x.csv"
-    assert run(driver, RunOptions(url="u", export_reference=str(out))) == 0
+    assert run(driver, RunOptions(url="u", export_reference=str(out)), TODAY) == 0
     assert out.exists()
 
 

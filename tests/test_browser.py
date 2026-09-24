@@ -90,3 +90,9 @@ def test_go_weeks_falls_back_to_javascript_click():
     driver.execute_script = lambda script, element: scripts.append((script, element))
     PlantaPage(driver).go_weeks(-1)
     assert len(scripts) == 1 and "click()" in scripts[0][0]
+
+
+def test_wait_for_any_date():
+    page = PlantaPage(FakeDriver(hours_elements=[hours_element("2024-01-02", "a", 0)]))
+    assert page.wait_for_any_date(["2024-01-01", "2024-01-02"], 0.1) is True
+    assert page.wait_for_any_date(["2024-01-08"], 0.1) is False

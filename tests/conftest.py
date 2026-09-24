@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -72,14 +73,18 @@ class FakeDriver:
         return []
 
     def find_element(self, by, selector):
+        from selenium.common.exceptions import NoSuchElementException
+
         if selector in self.nav:
             return self.nav[selector]
         if selector == SELECTORS["selectors"]["hours_input"] and self.hours_elements:
             return self.hours_elements[0]
         if selector in self.by_id:
             return self.by_id[selector]
-        from selenium.common.exceptions import NoSuchElementException
-
+        wanted_dates = re.findall(r"\[id\$='([^']+)'\]", selector)
+        for element in self.hours_elements:
+            if any((element.element_id or "").endswith(date) for date in wanted_dates):
+                return element
         raise NoSuchElementException(selector)
 
     def execute_script(self, script, element):

@@ -124,4 +124,7 @@ How long the browser stays open after the run so you can verify the result.
    attached), it asks you to log in and press ENTER, then waits up to 60 s more.
 4. Otherwise it stops with "The timesheet did not appear".
 
+After each week change the tool waits up to 10 s for the inputs of the target
+week and refuses to write if another week is still shown.
+
 Timeouts live in `SELECTORS["timeouts"]` in `config.py`.

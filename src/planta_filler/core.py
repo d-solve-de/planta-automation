@@ -12,6 +12,7 @@ import sys
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 from .browser import PlantaPage
@@ -25,7 +26,7 @@ from .config import (
     SELECTORS,
     WEEKDAY_NAMES,
 )
-from .exceptions import LoginRequiredError, ReferenceFileError
+from .exceptions import BrowserError, LoginRequiredError, ReferenceFileError
 from .reference_handler import (
     WEEKDAY_HEADERS,
     ReferenceWeek,
@@ -33,7 +34,13 @@ from .reference_handler import (
     load_reference_week,
     save_reference_week,
 )
-from .week_handler import filter_dates_by_weekdays, week_offset_from_today, weekday_of
+from .week_handler import (
+    filter_dates_by_weekdays,
+    get_week_dates,
+    parse_week_spec,
+    week_offset_from_today,
+    weekday_of,
+)
 
 log = logging.getLogger(__name__)
 
@@ -79,14 +86,51 @@ def open_timesheet(page: PlantaPage, url: str, interactive: bool = True) -> None
         raise LoginRequiredError("The timesheet still did not appear after login. Check the URL and your account.")
 
 
-def iter_weeks(page: PlantaPage, week_specs: list[str]) -> Iterator[str]:
-    """Navigate to every requested week in order and yield its spec once it is visible."""
+@dataclass(frozen=True)
+class VisibleWeek:
+    """A requested week after navigation: its spec and the seven dates it covers."""
+
+    spec: str
+    year: int
+    week: int
+    dates: tuple[str, ...]
+
+    @property
+    def label(self) -> str:
+        return f"{self.spec} (week {self.week}/{self.year}, {self.dates[0]} to {self.dates[-1]})"
+
+
+def iter_weeks(page: PlantaPage, week_specs: list[str], today: datetime | None = None) -> Iterator[VisibleWeek]:
+    """Navigate to every requested week in order and yield it once it is visible.
+
+    After clicking the arrows the page re-renders asynchronously, so we wait
+    until an input of the target week exists before yielding.
+    """
+    today = today or datetime.now()
     current_offset = 0
     for spec in week_specs:
-        target = week_offset_from_today(spec)
+        target = week_offset_from_today(spec, today)
+        year, week = parse_week_spec(spec, today)
+        dates = tuple(get_week_dates(year, week))
         page.go_weeks(target - current_offset)
         current_offset = target
-        yield spec
+        if not page.wait_for_any_date(dates, SELECTORS["timeouts"]["navigation_seconds"]):
+            log.warning("Could not confirm that week %s is visible yet; checking the dates before writing", spec)
+        yield VisibleWeek(spec, year, week, dates)
+
+
+def _dates_to_process(hours: dict, weekdays: list[int] | None, week: VisibleWeek | None) -> list[str]:
+    """Selected dates of the visible week, refusing to work on a week we did not ask for."""
+    visible = sorted(hours)
+    if week is not None:
+        in_week = [d for d in visible if d in week.dates]
+        if visible and not in_week:
+            raise BrowserError(
+                f"PLANTA shows {visible[0]} to {visible[-1]} but week {week.label} was requested; "
+                "week navigation did not work, nothing was changed for this week"
+            )
+        visible = in_week
+    return filter_dates_by_weekdays(visible, weekdays)
 
 
 def exclude_mask(exclude_indices: list[int], num_slots: int) -> list[int]:
@@ -117,10 +161,10 @@ def _reference_for_day(reference: ReferenceWeek | None, date: str, num_slots: in
         return create_default_reference(num_slots)
 
 
-def _apply_values(page: PlantaPage, fields, new_values: list[float], delay: float) -> int:
+def _apply_values(page: PlantaPage, fields, new_values: list[float], delay: float, precision: int) -> int:
     changes = 0
     for hour_field, new_value in zip(fields, new_values):
-        if abs(new_value - hour_field.value) <= 10**-DEFAULT_PRECISION / 2:
+        if abs(new_value - hour_field.value) < 10**-precision / 2:  # unchanged at UI precision
             continue
         if page.write_hours(hour_field.field_id, new_value):
             changes += 1
@@ -131,11 +175,20 @@ def _apply_values(page: PlantaPage, fields, new_values: list[float], delay: floa
 # --- per-week operations ---------------------------------------------------------
 
 
-def fill_visible_week(page: PlantaPage, options: RunOptions, reference: ReferenceWeek | None = None) -> int:
-    """Fill every selected working day of the week on screen. Returns the number of changed cells."""
+def fill_visible_week(
+    page: PlantaPage,
+    options: RunOptions,
+    reference: ReferenceWeek | None = None,
+    week: VisibleWeek | None = None,
+) -> int:
+    """Fill every selected working day of the week on screen. Returns the number of changed cells.
+
+    ``week`` restricts the work to the dates of that week and raises if PLANTA
+    shows a different one.
+    """
     hours = page.read_hours()
     targets = page.read_target_hours()
-    dates = filter_dates_by_weekdays(sorted(hours), options.weekdays)
+    dates = _dates_to_process(hours, options.weekdays, week)
     working_dates = [d for d in dates if targets.get(d, 0.0) > 0]
     log.info("Processing %d working day(s) with strategy %s", len(working_dates), options.strategy.upper())
 
@@ -167,32 +220,34 @@ def fill_visible_week(page: PlantaPage, options: RunOptions, reference: Referenc
             new_values,
             sum(new_values),
         )
-        changes = _apply_values(page, fields, new_values, options.delay)
+        changes = _apply_values(page, fields, new_values, options.delay, options.precision)
         log.info("   ✅ %d change(s) applied", changes)
         total_changes += changes
     return total_changes
 
 
-def reset_visible_week(page: PlantaPage, options: RunOptions) -> int:
+def reset_visible_week(page: PlantaPage, options: RunOptions, week: VisibleWeek | None = None) -> int:
     """Set every selected, non-excluded cell of the visible week to 0."""
     hours = page.read_hours()
-    dates = filter_dates_by_weekdays(sorted(hours), options.weekdays)
+    dates = _dates_to_process(hours, options.weekdays, week)
     log.info("Resetting %d day(s)", len(dates))
     total_changes = 0
     for date in dates:
         fields = hours[date]
         mask = exclude_mask(options.exclude_indices, len(fields))
         kept = [f.value if excluded else 0.0 for f, excluded in zip(fields, mask)]
-        changes = _apply_values(page, fields, kept, options.delay)
+        changes = _apply_values(page, fields, kept, options.delay, options.precision)
         log.info("   ✅ %s reset (%d change(s))", date, changes)
         total_changes += changes
     return total_changes
 
 
-def export_visible_week(page: PlantaPage, path: str | Path, weekdays: list[int] | None = None) -> Path:
+def export_visible_week(
+    page: PlantaPage, path: str | Path, weekdays: list[int] | None = None, week: VisibleWeek | None = None
+) -> Path:
     """Save the values currently on screen as a whole-week reference CSV."""
     hours = page.read_hours()
-    dates = filter_dates_by_weekdays(sorted(hours), weekdays)
+    dates = _dates_to_process(hours, weekdays, week)
     if not dates:
         raise ReferenceFileError("No days with hours inputs are visible; nothing to export")
     columns = {WEEKDAY_HEADERS[weekday_of(d)][0]: [f.value for f in hours[d]] for d in dates}
@@ -219,8 +274,11 @@ def wait_before_close(seconds: float) -> None:
 # --- entry point -----------------------------------------------------------------
 
 
-def run(driver, options: RunOptions) -> int:
-    """Execute the whole workflow on an already started driver. Returns the number of changed cells."""
+def run(driver, options: RunOptions, today: datetime | None = None) -> int:
+    """Execute the whole workflow on an already started driver. Returns the number of changed cells.
+
+    ``today`` anchors relative week specs; it defaults to now and exists for tests.
+    """
     page = PlantaPage(driver)
     open_timesheet(page, options.url, options.interactive)
 
@@ -231,18 +289,18 @@ def run(driver, options: RunOptions) -> int:
     if options.export_reference:
         if len(options.week_specs) != 1:
             raise ReferenceFileError("--export-reference works with exactly one week")
-        for _ in iter_weeks(page, options.week_specs):
-            export_visible_week(page, options.export_reference, options.weekdays)
+        for week in iter_weeks(page, options.week_specs, today):
+            export_visible_week(page, options.export_reference, options.weekdays, week)
         return 0
 
     reference = load_reference(options)
     total = 0
-    for spec in iter_weeks(page, options.week_specs):
-        log.info("\n=== Week %s ===", spec)
+    for week in iter_weeks(page, options.week_specs, today):
+        log.info("\n=== Week %s ===", week.label)
         if options.reset:
-            total += reset_visible_week(page, options)
+            total += reset_visible_week(page, options, week)
         else:
-            total += fill_visible_week(page, options, reference)
+            total += fill_visible_week(page, options, reference, week)
 
     log.info("\n✅ Done: %d cell(s) changed", total)
     wait_before_close(options.close_delay)
@@ -252,6 +310,7 @@ def run(driver, options: RunOptions) -> int:
 __all__ = [
     "BLANK",
     "RunOptions",
+    "VisibleWeek",
     "export_visible_week",
     "fill_visible_week",
     "iter_weeks",

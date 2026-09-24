@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -103,6 +104,16 @@ class PlantaPage:
         locator = (By.CSS_SELECTOR, self.selectors["selectors"]["hours_input"])
         try:
             WebDriverWait(self.driver, timeout).until(EC.presence_of_element_located(locator))
+        except TimeoutException:
+            return False
+        return True
+
+    def wait_for_any_date(self, dates: Sequence[str], timeout: float) -> bool:
+        """Return True once an hours input for one of ``dates`` (``YYYY-MM-DD``) exists."""
+        base = self.selectors["selectors"]["hours_input"]
+        selector = ", ".join(f"{base}[id$='{date}']" for date in dates)
+        try:
+            WebDriverWait(self.driver, timeout).until(EC.presence_of_element_located((By.CSS_SELECTOR, selector)))
         except TimeoutException:
             return False
         return True
