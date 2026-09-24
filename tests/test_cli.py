@@ -147,3 +147,9 @@ def test_quiet_and_verbose_configure_logging(fake_run):
     assert logging.getLogger().level == logging.WARNING
     cli_mod.main(["--url", "https://x", "--verbose"])
     assert logging.getLogger().level == logging.DEBUG
+
+
+def test_login_only_invocation(fake_run, capsys):
+    assert cli_mod.main(["--url", "https://example.com", "--login-only"]) == 0
+    assert fake_run["options"].login_only is True
+    assert "LOGIN ONLY" in capsys.readouterr().out

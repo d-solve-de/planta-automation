@@ -1,2 +1,3 @@
 include README.md LICENSE CHANGELOG.md
 recursive-include src/planta_filler/data *.csv *.txt
+recursive-include tests *.py

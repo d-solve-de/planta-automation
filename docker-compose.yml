@@ -1,0 +1,34 @@
+# Usage (see docs/docker.md):
+#   cp .env.example .env && edit PLANTA_URL
+#   docker compose run --rm login        # once, needs an X11 display
+#   docker compose run --rm fill         # headless fill of the current week
+#   docker compose run --rm fill --week=-1 --strategy random
+# Podman: `podman compose ...` or `podman-compose ...` work the same way.
+
+services:
+  fill:
+    build: .
+    image: planta-filler:local
+    stdin_open: true
+    tty: true
+    volumes:
+      - planta-profile:/home/planta/.selenium_profiles
+      - ${REFERENCE_DIR:-./examples/reference-files}:/data/reference:ro
+    command: ["--url", "${PLANTA_URL:?set PLANTA_URL in .env}", "--headless", "--close-delay", "0"]
+
+  # One-time interactive login that fills the profile volume. Shares the host's
+  # X11 display so the Firefox window is visible (Linux; run `xhost +local:` first).
+  login:
+    build: .
+    image: planta-filler:local
+    stdin_open: true
+    tty: true
+    environment:
+      DISPLAY: ${DISPLAY:-:0}
+    volumes:
+      - planta-profile:/home/planta/.selenium_profiles
+      - /tmp/.X11-unix:/tmp/.X11-unix:ro
+    command: ["--url", "${PLANTA_URL:?set PLANTA_URL in .env}", "--login-only", "--close-delay", "0"]
+
+volumes:
+  planta-profile:

@@ -191,3 +191,9 @@ def test_wait_before_close_counts_down(monkeypatch):
     core.wait_before_close(3)
     core.wait_before_close(0)
     assert sleeps == [1, 1, 1]
+
+
+def test_run_login_only_changes_nothing():
+    driver = two_day_driver()
+    assert run(driver, RunOptions(url="u", login_only=True)) == 0
+    assert all(e.send_keys_calls == 0 for e in driver.hours_elements)

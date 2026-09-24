@@ -53,6 +53,7 @@ class RunOptions:
     close_delay: float = DEFAULT_CLOSE_DELAY
     reset: bool = False
     export_reference: str | None = None
+    login_only: bool = False
     interactive: bool = True
     precision: int = DEFAULT_PRECISION
     retries: int = DEFAULT_RETRIES
@@ -222,6 +223,10 @@ def run(driver, options: RunOptions) -> int:
     """Execute the whole workflow on an already started driver. Returns the number of changed cells."""
     page = PlantaPage(driver)
     open_timesheet(page, options.url, options.interactive)
+
+    if options.login_only:
+        log.info("✅ Logged in and timesheet visible; nothing was changed (--login-only)")
+        return 0
 
     if options.export_reference:
         if len(options.week_specs) != 1:

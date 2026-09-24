@@ -129,6 +129,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--headless", action="store_true", default=DEFAULT_HEADLESS, help="run Firefox without a window"
     )
     browser.add_argument(
+        "--login-only",
+        action="store_true",
+        help="open PLANTA, wait for the login and exit without changing anything (sets up the persistent profile)",
+    )
+    browser.add_argument(
         "--delay", type=float, default=DEFAULT_DELAY, help="seconds between field updates (default: %(default)s)"
     )
     browser.add_argument(
@@ -183,13 +188,22 @@ def options_from_args(args: argparse.Namespace) -> RunOptions:
         close_delay=validated["close_delay"],
         reset=args.reset,
         export_reference=args.export_reference,
+        login_only=args.login_only,
         interactive=interactive,
     )
 
 
 def print_summary(options: RunOptions, headless: bool, persistent: bool) -> None:
     weeks = ", ".join(format_week_display(*parse_week_spec(spec)) for spec in options.week_specs)
-    action = "EXPORT" if options.export_reference else "RESET" if options.reset else "FILL"
+    action = (
+        "LOGIN ONLY"
+        if options.login_only
+        else "EXPORT"
+        if options.export_reference
+        else "RESET"
+        if options.reset
+        else "FILL"
+    )
     lines = [
         "=" * 70,
         "PLANTA TIMESHEET AUTOMATION",

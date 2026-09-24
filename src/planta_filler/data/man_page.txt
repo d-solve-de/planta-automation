@@ -69,6 +69,11 @@ OPTIONS
         persistent profile because nobody can type the password.
         Default: {default_headless}
 
+    --login-only
+        Open PLANTA, wait until you are logged in and exit without changing
+        any hours. Use it once to prepare the persistent profile for later
+        --headless runs (for example inside a container).
+
     --delay SECONDS
         Pause between two field updates. Increase it on slow connections.
         Default: {default_delay}

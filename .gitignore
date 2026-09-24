@@ -1,5 +1,29 @@
-.DS_Store
-venv/
+# Python
 __pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Environments
+venv/
+.venv/
+.env
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Local notes and generated files
 agents.md
 specific-use.md
+*.csv.bak

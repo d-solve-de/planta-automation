@@ -1,71 +1,59 @@
-# Copilot Instructions for planta-automation
+# Copilot instructions for planta-automation
 
-## Project Overview
-Selenium-based automation for PLANTA timesheet filling. Automates hour distribution across tasks using configurable strategies, running headlessly or with Firefox UI. Published as PyPI package `planta-filler`.
+Python package `planta-filler` (import name `planta_filler`): Selenium/Firefox
+automation that fills PLANTA Pulse timesheets. Full docs live in `docs/`; read
+`docs/architecture.md` before changing the structure.
 
-## Architecture
+## Layout
 
 ```
 src/planta_filler/
-├── __init__.py       # Package exports
-├── __main__.py       # Entry: python3 -m planta_filler
-├── cli.py            # main(), CLI argument parsing
-├── core.py           # Selenium browser control (start_driver, set_week, reset_week)
-├── calculations.py   # fill_day() - orchestrates strategy execution
-├── strategies.py     # Strategy implementations (equal, random, copy_reference)
-├── config.py         # Single source of truth for defaults + SELECTORS
-├── validation.py     # Input validation
-├── week_handler.py   # Week parsing and navigation
-├── reference_handler.py  # Reference day file handling
-└── data/
-    ├── man_page.txt
-    └── default_reference.csv
+├── cli.py              argparse -> validation -> RunOptions -> core.run()
+├── core.py             workflow: open_timesheet, iter_weeks, fill/reset/export a week
+├── browser.py          Selenium only: start_driver/end_driver, PlantaPage (DOM access)
+├── calculations.py     fill_day(): map a strategy result onto the real task rows
+├── strategies.py       equal / random / copy_reference, registered in STRATEGIES
+├── reference_handler.py  read/write reference CSVs (ReferenceWeek)
+├── validation.py       validate_* functions raising ValidationError
+├── week_handler.py     week spec parsing, ISO week helpers
+├── config.py           all defaults, limits and CSS selectors
+├── exceptions.py       PlantaFillerError hierarchy
+└── data/               default_reference.csv, man_page.txt
+tests/                  pytest; conftest.py provides FakeDriver (no real browser)
+docs/                   user and maintainer documentation
 ```
 
-**Data Flow:** CLI args → `main()` → `validate_all_inputs()` → `start_driver()` → `set_week()`/`reset_week()` → reads DOM → `fill_day()` → strategy function → Selenium writes → `end_driver()`
+## Conventions
 
-## Key Conventions
+- Only `browser.py` imports Selenium. `core.py` works against `PlantaPage`, so it is
+  testable with `tests/conftest.py::FakeDriver`.
+- Defaults and selectors are defined once in `config.py`; the CLI, the man page and
+  the docs read them from there.
+- Raise subclasses of `PlantaFillerError`; `cli.main()` turns them into messages and
+  exit codes (2 = invalid input, 1 = runtime failure).
+- Value encoding in `calculations.py`: `-1` = blank cell, exclude mask `1` = never touch.
+- Type hints with `from __future__ import annotations`; Python 3.9 compatible.
+- Formatting and linting: `ruff` (config in `pyproject.toml`, line length 120).
+- Every behaviour change needs a test and a `CHANGELOG.md` entry under `[Unreleased]`.
+- Version is defined once in `src/planta_filler/__init__.py` (`__version__`).
 
-### Strategy Pattern
-All distribution strategies follow this signature in strategies.py:
-```python
-def strategy_name(total_hours: float, slots: int, precision: int=2, ...) -> list[float]
-```
-Register new strategies in the `strategies` dict, add case in `fill_day()`, update `VALID_STRATEGIES` in `config.py`.
+## Common tasks
 
-### fill_day() Value Encoding
-- `-1` = empty/blank cell (to be filled)
-- `0` or positive float = existing value
-- `exclude_values` list uses `1` = excluded, `0` = include
+- New strategy: implement in `strategies.py` with signature
+  `fn(total_hours, slots, precision=2, **kwargs) -> list[float]`, register it in
+  `STRATEGIES`, add the name to `VALID_STRATEGIES` in `config.py`, document it in
+  `data/man_page.txt` and `docs/cli-reference.md`, add tests.
+- New CLI option: `cli.build_parser()`, then `options_from_args()` / `RunOptions`,
+  validation in `validation.py`, man page, `docs/cli-reference.md`, tests in
+  `tests/test_cli.py`.
+- PLANTA UI changed: update `SELECTORS` in `config.py`; run
+  `docs/manual-test-checklist.md` against a test account.
 
-### Configuration
-- All defaults and CSS selectors in `config.py` (single source of truth)
-- No docstrings in code - all documentation in README.md
-- Purpose comments at top of each file only
-
-### Code Style
-- Use relative imports within package (from .config import ...)
-- All commands use python3
-- Each feature gets its own local commit
-
-## Development Commands
+## Commands
 
 ```bash
-# Run from source
-python3 -m planta_filler --url URL
-
-# Install in editable mode
-pip3 install -e .
-
-# Show full man page
-python3 -m planta_filler --man
+make dev      # editable install with dev tools
+make check    # ruff check + ruff format --check + pytest
+make build    # sdist + wheel + twine check
+planta-filler --man
 ```
-
-## Common Modifications
-
-- **Add new strategy**: Implement in `strategies.py`, add to `strategies` dict, add case in `fill_day()`, update `VALID_STRATEGIES` in `config.py`
-- **Change selectors**: Update `SELECTORS` dict in `config.py`
-- **Add CLI option**: Modify `argparse` section in `cli.py`, update `man_page.txt`
-- **Change defaults**: Update `config.py`
-- **Add CLI option**: Modify `argparse` section in `main()`, update `man_page.txt`
-- **Change defaults**: Update `config.py`
